@@ -316,8 +316,11 @@ func showHelpEnv() {
     fmt.Printf("%-35s   Private Key File2     (default: %v)\n", env_smtproxy_key_file2,          formatStr(defaultKeyFile2));
 
     fmt.Printf("%-35s   Server name\n",                         env_smtproxy_ServerName);
-    fmt.Printf("%-35s   Log level\n",                           env_smtproxy_LogLevel);
+    fmt.Printf("%-35s   Log level             \n",              env_smtproxy_LogLevel);
     fmt.Printf("%-35s   Handshake Log level\n",                 env_smtproxy_HandshakeLogLevel);
+
+    fmt.Printf("\n");
+    fmt.Printf("%-35s   %d=%s %d=%s %d=%s %d=%s %d=%s \n", "Log Level Values", LOG_NONE, LOG_NONE, LOG_ERROR, LOG_ERROR, LOG_INFO, LOG_INFO, LOG_VERBOSE, LOG_VERBOSE, LOG_DEBUG, LOG_DEBUG);
     fmt.Printf("\n");
 }
 

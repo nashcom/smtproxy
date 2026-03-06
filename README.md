@@ -11,6 +11,21 @@ The proxy is designed to be **simple, fast, and container-friendly**, making it 
 Because the application is intended to run containerized the configuration leverages environment variables.  
 See [environment variables](smtpoxy_env.md) for supported configuration options.
 
+# Logging
+
+The application supports multiple log levels and provides a very clean and helpful log format.
+See this [example log document](smtproxy_log_example.md)
+
+## Log level
+
+There are 5 standard log levels from **NONE** to **DEBUG**
+
+- **0**=NONE
+- **1**=ERROR
+- **2**=INFO
+- **3**=VERBOSE
+- **4**=DEBUG
+
 
 # Run on Docker
 
