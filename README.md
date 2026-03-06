@@ -111,10 +111,10 @@ The proxy supports modern TLS functionality.
 Supported features include:
 
 * TLS 1.2 and TLS 1.3
-* optional TLS 1.3-only policy
-* automatic certificate selection
+* Optional TLS 1.3-only policy
+* Automatic certificate selection
 * RSA and ECDSA certificates
-* client and upstream TLS negotiation
+* Client and upstream TLS negotiation
 
 Multiple certificates can be loaded so the proxy can automatically choose the best certificate depending on the client’s capabilities.
 
@@ -152,17 +152,27 @@ Multiple upstream servers can be configured.
 
 The proxy supports three routing modes:
 
-### Local-First
+## Local-First
 
 Local servers are tried first, followed by remote servers.
 
-### Failover
+## Failover
 
 If one server fails, the proxy automatically tries the next server.
 
-### Load Balancing
+## Load Balancing
 
 Connections are distributed across servers using round-robin selection.
+
+
+# Multiple key support
+
+SMTP servers mostly use RSA keys.
+But ECDSA keys are getting wider spread with TLS 1.3.
+TLS 1.3 has improved support for picking the right ciphers and using the right certificates.
+The SMTP proxy tries to pick the right certificates for TLS 1.2 and TLS 1.3 using a custom logic.
+The handshake code iterates thru the certificates and tries to find the best match.
+A separate log logic is available to log details about the handshake.
 
 
 # XCLIENT Support
@@ -236,4 +246,3 @@ Main features include:
 * session logging
 
 The implementation focuses on **simplicity, performance, and operational visibility**, making it suitable for both traditional and cloud-native deployments.
-

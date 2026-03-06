@@ -370,7 +370,7 @@ func main() {
     routingMode, ErrRoutingMode := ParseRoutingMode(getEnv(env_smtproxy_RoutingMode, ""))
 
     if ErrRoutingMode != nil {
-        log.Fatalf("Invalid routing mode in configuration (%s) Valid options [%s|%s|%s] : %v", 
+        log.Fatalf("Invalid routing mode in configuration (%s) Valid options [%s|%s|%s] : %v",
             env_smtproxy_RoutingMode, RoutingModeLocalFirst, RoutingModeFailover, RoutingModeLoadBalance, ErrRoutingMode)
     }
 
@@ -620,10 +620,6 @@ func main() {
                     continue
                 }
 
-                if gLogLevel >= LOG_DEBUG {
-                    log.Printf("Accepted new client from [%s] (Current Connections: %d)", conn.RemoteAddr(), CurrentActiveConnections)
-                }
-
                 go handleConnection(conn, cfg, false)
             }
         }()
@@ -683,6 +679,7 @@ func NewSmtpSession(client net.Conn, cfg *SmtpProxyCfg, implicitTLS bool) *SmtpS
 
 
 func (s *SmtpSession) logf(level LogLevel, format string, args ...any) {
+
     if level > gLogLevel {
         return
     }
@@ -699,13 +696,27 @@ func (s *SmtpSession) logf(level LogLevel, format string, args ...any) {
 
 func (s *SmtpSession) readClientLine() (string, error) {
     s.client.SetReadDeadline(time.Now().Add(60 * time.Second))
-    return s.clientReader.ReadString('\n')
+
+    line, err := s.clientReader.ReadString('\n')
+
+    if gLogLevel >= LOG_DEBUG {
+        s.logf(LOG_DEBUG, "C>  %s", strings.TrimSpace(line))
+    }
+
+    return line, err
 }
 
 
 func (s *SmtpSession) readUpstreamLine() (string, error) {
     s.upstream.SetReadDeadline(time.Now().Add(60 * time.Second))
-    return s.upstreamReader.ReadString('\n')
+
+    line, err := s.upstreamReader.ReadString('\n')
+
+    if gLogLevel >= LOG_DEBUG {
+        s.logf(LOG_DEBUG, "U>  %s", strings.TrimSpace(line))
+    }
+
+    return line, err
 }
 
 
@@ -713,6 +724,11 @@ func (s *SmtpSession) writeClientBytes(data []byte) error {
 
     written, err := s.client.Write(data)
     s.bytesUpstreamToClient += int64(written)
+
+    if gLogLevel >= LOG_DEBUG {
+        s.logf(LOG_DEBUG, "C<  %s", strings.TrimSpace(string (data)))
+    }
+
     return err
 }
 
@@ -720,6 +736,11 @@ func (s *SmtpSession) writeClientBytes(data []byte) error {
 func (s *SmtpSession) writeUpstreamStr(data string) error {
     written, err := s.upstream.Write([]byte(data))
     s.bytesClientToUpstream += int64(written)
+
+    if gLogLevel >= LOG_DEBUG {
+        s.logf(LOG_DEBUG, "U<  %s", strings.TrimSpace(data))
+    }
+
     return err
 }
 
@@ -727,7 +748,7 @@ func (s *SmtpSession) writeUpstreamStr(data string) error {
 func (s *SmtpSession) connectUpstream() error {
     targets := s.cfg.selectUpstreams()
 
-    s.logf(LOG_DEBUG, "connectUpstream: %v", targets)
+    s.logf(LOG_DEBUG, "Connect to Upstream: %v", targets)
 
     dialer := net.Dialer{
         Timeout: 5 * time.Second,
@@ -819,7 +840,7 @@ func (s *SmtpSession) connectUpstream() error {
             fmt.Fprintf(conn, smtpCommand_STARTTLS)
 
             resp, err := reader.ReadString('\n')
-            if err != nil || !strings.HasPrefix(resp, "220") {
+            if err != nil || !isSMTP2xx(resp) {
                 s.logf(LOG_ERROR, "Cannot unexpected status returned from upstream [%s]. Response: [%v] : %v", target, resp, err)
                 conn.Close()
                 goto nextTarget
@@ -1089,8 +1110,6 @@ func (s *SmtpSession) run() {
         }
 
         cmd := strings.ToUpper(strings.TrimSpace(line))
-
-        s.logf(LOG_DEBUG, "Cmd: %s", cmd)
 
         if strings.HasPrefix(cmd, "EHLO ") ||
             strings.HasPrefix(cmd, "HELO ") {
@@ -1533,4 +1552,9 @@ func formatStr(s string) string {
 func fileExists(filename string) bool {
     _, err := os.Stat(filename)
     return err == nil
+}
+
+
+func isSMTP2xx(resp string) bool {
+    return len(resp) >= 3 && resp[0] == '2'
 }
