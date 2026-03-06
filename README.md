@@ -1,15 +1,14 @@
 
-# SMTP TLS Proxy in Go
+# SMTP TLS Proxy
 
-This program implements a lightweight **SMTP proxy with TLS support** written in Go.
-It sits between SMTP clients and one or more upstream mail servers and adds features such as TLS enforcement, routing, and connection logging.
-
+This program implements a lightweight **SMTP proxy with STARTTLS and Implicit TLS support**.
+It sits between SMTP clients and one or more upstream mail servers and adds features such as TLS enforcement, routing, and connection logging.  
 The proxy is designed to be **simple, fast, and container-friendly**, making it suitable for modern deployments such as Kubernetes (K8s) environments.
 
 
 # Environment variables
 
-Because the application is intended to run containerized the configuration leverages environment variables.
+Because the application is intended to run containerized the configuration leverages environment variables.  
 See [environment variables](smtpoxy_env.md) for supported configuration options.
 
 
