@@ -1,6 +1,10 @@
 
+# Example statup including configuration output
 
-SMTP Proxy V0.9.3
+```
+
+
+SMTP Proxy V0.9.4
 -------------------------
 
 Copyright 2026 Nash!Com/Daniel Nashed. All rights reserved.
@@ -58,3 +62,7 @@ Trust Store    :  148
 2026/03/06 19:39:23 Shutting down ...
 2026/03/06 19:39:24 Waiting maximum 60 seconds for shutdown ...
 2026/03/06 19:39:24 All connections closed
+
+
+```
+
