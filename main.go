@@ -7,16 +7,21 @@ import (
     "crypto/tls"
     "crypto/x509"
     "encoding/hex"
+    "flag"
+    "fmt"
     "io"
     "log"
     "net"
+    "net/http"
     "os"
+    "os/signal"
+    "runtime"
+    "strconv"
     "strings"
     "sync/atomic"
-    "flag"
-    "fmt"
+    "syscall"
     "time"
-    "strconv"
+    "errors"
 )
 
 
@@ -27,9 +32,13 @@ type RoutingMode int
 var gSessionCounter   uint64
 var gSessionError     uint64
 var gActiveConnections int64
+var gTotalConnections  int64
 
-var gLogLevel           LogLevel
-var gLogHandshakeLevel  LogLevel
+var gLogLevel            LogLevel
+var gLogHandshakeLevel   LogLevel
+var gShutdownRequested   bool
+var gMaxShutdownSeconds  int
+var gMetricListnerAddr   string
 
 const (
     TLSModeNone TLSMode = iota
@@ -86,7 +95,7 @@ func (m TLSMode) String() string {
     switch m {
 
     case TLSModeImplicit:
-        return "ImplicitTLS"
+        return "TLS"
 
     case TLSModeStartTLS:
         return "STARTTLS"
@@ -209,11 +218,14 @@ type SmtpSession struct {
 
     clientTLSVersion   string
     clientCipher       string
+    clientCurveID      string
     clientIP           string
+
     upstreamIP         string
     upstreamTarget     string
     upstreamTLSVersion string
     upstreamCipher     string
+    upstreamCurveID    string
 
     sessionError       string
     responseLines      []string
@@ -236,12 +248,13 @@ var (
 
 
 const (
-    version   = "0.9.3"
+    version   = "0.9.4"
     copyright = "Copyright 2026 Nash!Com/Daniel Nashed. All rights reserved."
 
     defaultListenAddr          = ":1025"
     defaultTlsListenAddr       = ":1465"
     defaultLocalUpstream       = ":25"
+    defaultMetricsAddr         = ":9100"
     defaultRemoteUpstream      = ""
     defaultRequireTLS          = true
     defaultClientTLS13Only     = false
@@ -257,7 +270,10 @@ const (
     defaultKeyFile             = "/tls/tls.key"
     defaultCertFile2           = ""
     defaultKeyFile2            = ""
-    defaultMaxConnections      = 100
+    defaultMaxConnections      = 1000
+    defaultMaxShutdownSeconds  = 60
+    defaultLogLevel            = LOG_ERROR
+    defaultHandshakeLogLevel   = LOG_NONE
 
     env_smtproxy_ListenAddr         = "SMTPROXY_LISTEN_ADDR"
     env_smtproxy_TlsListenAddr      = "SMTPROXY_TLS_LISTEN_ADDR"
@@ -276,73 +292,136 @@ const (
     env_smtproxy_SendXCLIENT        = "SMTPROXY_SEND_XCLIENT"
     env_smtproxy_LogLevel           = "SMTPROXY_LOGLEVEL"
     env_smtproxy_HandshakeLogLevel  = "SMTPROXY_HANDSHAKE_LOGLEVEL"
-    env_smtproxy_client_timeout     = "SMTPROXY_CLIENT_TIMEOUT"
-    env_smtproxy_max_connections    = "SMTPROXY_MAX_CONNECTIONS"
-
-    env_smtproxy_cert_file          = "SMTPROXY_CERT_FILE"
-    env_smtproxy_key_file           = "SMTPROXY_KEY_FILE"
-    env_smtproxy_cert_file2         = "SMTPROXY_CERT_FILE2"
-    env_smtproxy_key_file2          = "SMTPROXY_KEY_FILE2"
+    env_smtproxy_ClientTimeoutSec   = "SMTPROXY_CLIENT_TIMEOUT"
+    env_smtproxy_MaxConnections     = "SMTPROXY_MAX_CONNECTIONS"
+    env_smtproxy_CertFile           = "SMTPROXY_CERT_FILE"
+    env_smtproxy_KeyFile            = "SMTPROXY_KEY_FILE"
+    env_smtproxy_CertFile2          = "SMTPROXY_CERT_FILE2"
+    env_smtproxy_KeyFile2           = "SMTPROXY_KEY_FILE2"
+    env_smtproxy_MaxShutdownSec     = "SMTPROXY_SHUTDOWN_SECONDS"
+    env_smtproxy_MetricsListenAddr  = "SMTPROXY_METRICS_LISTEN_ADDR"
 )
 
 
-func showHelpEnv() {
-
-    fmt.Printf("\n");
-
-    fmt.Printf("Environment variables\n");
-    fmt.Printf("---------------------\n");
-    fmt.Printf("\n");
-    fmt.Printf("%-35s   STARTTLS listen address (default: %s)\n", env_smtproxy_ListenAddr,    formatStr(defaultListenAddr));
-    fmt.Printf("%-35s   TLS      listen address (default: %s)\n", env_smtproxy_TlsListenAddr, formatStr(defaultTlsListenAddr));
-    fmt.Printf("%-35s   Routing Mode [%s|%s|%s] (default: %s)\n", env_smtproxy_RoutingMode,   RoutingModeLocalFirst, RoutingModeFailover, RoutingModeLoadBalance, RoutingModeLocalFirst);
-
-    fmt.Printf("%-35s   Local  Upstreams (default: %s)\n",      env_smtproxy_LocalUpstreams,     formatStr(defaultLocalUpstream));
-    fmt.Printf("%-35s   Remote Upstreams (default: %s)\n",      env_smtproxy_RemoteUpstreams,    formatStr(defaultRemoteUpstream));
-    fmt.Printf("%-35s   Require TLS           (default: %v)\n", env_smtproxy_RequireTLS,         defaultRequireTLS);
-    fmt.Printf("%-35s   Upstream use STARTTLS (default: %v)\n", env_smtproxy_UpstreamSTARTTLS,   defaultUpstreamSTARTTLS);
-    fmt.Printf("%-35s   Upstream requires TLS (default: %v)\n", env_smtproxy_UpstreamRequireTLS, defaultUpstreamRequireTLS);
-    fmt.Printf("%-35s   Upstream implicit TLS (default: %v)\n", env_smtproxy_UpstreamTLS,        defaultUpstreamTLS);
-    fmt.Printf("%-35s   TLS13 Only            (default: %v)\n", env_smtproxy_TLS13Only,          defaultClientTLS13Only);
-    fmt.Printf("%-35s   Upstream TLS13 Only   (default: %v)\n", env_smtproxy_UpstreamTLS13Only,  defaultUpstreamTLS13Only);
-    fmt.Printf("%-35s   Skip cert validation  (default: %v)\n", env_smtproxy_SkipCertValidation, defaultSkipCertValidation);
-    fmt.Printf("%-35s   XCLIENT to signal IP  (default: %v)\n", env_smtproxy_SendXCLIENT,        defaultSendXCLIENT);
-    fmt.Printf("%-35s   Maximum sessions      (default: %d)\n", env_smtproxy_max_connections,    defaultMaxConnections);
-    fmt.Printf("%-35s   Trusted Root File     (default: %s)\n", env_smtproxy_TrustedRootFile,    "<System trust store>");
-
-    fmt.Printf("%-35s   Certificate File      (default: %v)\n", env_smtproxy_cert_file,          formatStr(defaultCertFile));
-    fmt.Printf("%-35s   Private Key File      (default: %v)\n", env_smtproxy_key_file,           formatStr(defaultKeyFile));
-    fmt.Printf("%-35s   Certificate File2     (default: %v)\n", env_smtproxy_cert_file2,         formatStr(defaultCertFile2));
-    fmt.Printf("%-35s   Private Key File2     (default: %v)\n", env_smtproxy_key_file2,          formatStr(defaultKeyFile2));
-
-    fmt.Printf("%-35s   Server name\n",                         env_smtproxy_ServerName);
-    fmt.Printf("%-35s   Log level             \n",              env_smtproxy_LogLevel);
-    fmt.Printf("%-35s   Handshake Log level\n",                 env_smtproxy_HandshakeLogLevel);
-
-    fmt.Printf("\n");
-    fmt.Printf("%-35s   %d=%s %d=%s %d=%s %d=%s %d=%s \n", "Log Level Values", LOG_NONE, LOG_NONE, LOG_ERROR, LOG_ERROR, LOG_INFO, LOG_INFO, LOG_VERBOSE, LOG_VERBOSE, LOG_DEBUG, LOG_DEBUG);
-    fmt.Printf("\n");
+func showCfg(description, variableName, defaultValue, currentValue any) {
+    fmt.Printf("%-34s  %-34s %-30v  %v\n", variableName, description, defaultValue, currentValue)
 }
 
 
+func showInfo(description, currentValue any) {
+    fmt.Printf("%-15s:  %v\n", description, currentValue)
+}
+
+
+func showRuntimeInfo() {
+
+    fmt.Printf("\nRuntime\n-------------------------\n\n")
+    showInfo("Go version", runtime.Version())
+    showInfo("OS",         runtime.GOOS)
+    showInfo("Arch",       runtime.GOARCH)
+    showInfo("CPUs",       runtime.NumCPU())
+    showInfo("PID",        os.Getpid())
+}
+
+
+func shutdown() {
+
+    log.Println("Shutting down ...")
+    gShutdownRequested = true
+
+    // Wait one second to make sure the signal arrived at listeners before checking if active sessions must be trained
+    time.Sleep(time.Second)
+
+    log.Printf("Waiting maximum %d seconds for shutdown ...\n", gMaxShutdownSeconds)
+
+    for i := 0; i < gMaxShutdownSeconds; i++ {
+        current := atomic.LoadInt64(&gActiveConnections)
+
+        if current == 0 {
+            break
+        }
+
+        if i%10 == 0 {
+            log.Printf("Waiting for %d active connections ...\n", current)
+        }
+        time.Sleep(time.Second)
+    }
+
+    remaining := atomic.LoadInt64(&gActiveConnections)
+
+    if remaining > 0 {
+        log.Printf("Shutdown timeout after %s seconds, %d connections still active\n", gMaxShutdownSeconds, remaining)
+    } else {
+        log.Println("All connections closed")
+    }
+
+    log.Println("Shutdown completed")
+}
+
+
+func metricsHandler(w http.ResponseWriter, r *http.Request) {
+
+    activeConnections := atomic.LoadInt64(&gActiveConnections)
+    totalConnections  := atomic.LoadInt64(&gTotalConnections)
+
+    w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+
+    fmt.Fprintf(w, "# HELP smtpproxy_active_connections Current active SMTP sessions\n")
+    fmt.Fprintf(w, "# TYPE smtpproxy_active_connections gauge\n")
+    fmt.Fprintf(w, "smtpproxy_active_connections %d\n", activeConnections)
+
+    fmt.Fprintf(w, "# HELP smtpproxy_connections_total Total SMTP connections\n")
+    fmt.Fprintf(w, "# TYPE smtpproxy_connections_total counter\n")
+    fmt.Fprintf(w, "smtpproxy_connections_total %d\n", totalConnections)
+}
+
+
+func startMetricsListener(addr string) {
+
+    metricsEndpoint := "/metrics"
+
+    mux := http.NewServeMux()
+    mux.HandleFunc(metricsEndpoint, metricsHandler)
+
+    go func() {
+        log.Printf("Listening at %-8s   on [%s]", metricsEndpoint, addr)
+
+        err := http.ListenAndServe(addr, mux)
+        if err != nil {
+            log.Println("Metrics listener stopped:", err)
+        }
+    }()
+}
+
 func main() {
 
-    var showVersion = flag.Bool("version", false, "show version")
-    var showEnv     = flag.Bool("env", false, "show environment variable help")
+    var printVersion   = flag.Bool("version", false, "print version")
+    var showGoVersion = flag.Bool("goversion", false, "show the go runtime version")
 
     flag.Parse()
 
-    if *showVersion {
+    if *printVersion {
         fmt.Printf("%s", version)
         return
     }
 
-    if *showEnv {
-        showHelpEnv()
+    fmt.Printf("\n")
+
+    if *showGoVersion {
+        showRuntimeInfo()
         return
     }
 
-    fmt.Printf("\n")
+    sigChan := make(chan os.Signal, 1)
+
+    signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+    go func() {
+        sig := <-sigChan
+        fmt.Printf("Received signal: %v\n", sig)
+        shutdown()
+        os.Exit(0)
+    }()
 
     listenAddr          := getEnv(env_smtproxy_ListenAddr,    defaultListenAddr)
     tlsListenAddr       := getEnv(env_smtproxy_TlsListenAddr, defaultTlsListenAddr)
@@ -351,24 +430,26 @@ func main() {
     localUpstreams      := strings.Split (getEnv(env_smtproxy_LocalUpstreams,  defaultLocalUpstream), ",")
     remoteUpstreams     := strings.Split (getEnv(env_smtproxy_RemoteUpstreams, defaultRemoteUpstream), ",")
 
-    requireTLS          := GetEnvBool(env_smtproxy_RequireTLS,         defaultRequireTLS)
-    upstreamStartTLS    := GetEnvBool(env_smtproxy_UpstreamSTARTTLS,   defaultUpstreamSTARTTLS)
-    upstreamImplicitTLS := GetEnvBool(env_smtproxy_UpstreamTLS,        defaultUpstreamTLS)
-    upstreamRequireTLS  := GetEnvBool(env_smtproxy_UpstreamRequireTLS, defaultUpstreamRequireTLS)
-    clientTLS13Only     := GetEnvBool(env_smtproxy_TLS13Only,          defaultClientTLS13Only)
-    upstreamTLS13Only   := GetEnvBool(env_smtproxy_UpstreamTLS13Only,  defaultUpstreamTLS13Only)
-    skipCertValidation  := GetEnvBool(env_smtproxy_SkipCertValidation, defaultSkipCertValidation)
-    sendXCLIENT         := GetEnvBool(env_smtproxy_SendXCLIENT,        defaultSendXCLIENT)
-    clientTimeoutSec    := getEnvInt(env_smtproxy_client_timeout,      defaultClientTimeoutSec)
-    maxConnections      := getEnvInt64(env_smtproxy_max_connections,   defaultMaxConnections)
+    requireTLS          := getEnvBool(env_smtproxy_RequireTLS,         defaultRequireTLS)
+    upstreamStartTLS    := getEnvBool(env_smtproxy_UpstreamSTARTTLS,   defaultUpstreamSTARTTLS)
+    upstreamImplicitTLS := getEnvBool(env_smtproxy_UpstreamTLS,        defaultUpstreamTLS)
+    upstreamRequireTLS  := getEnvBool(env_smtproxy_UpstreamRequireTLS, defaultUpstreamRequireTLS)
+    clientTLS13Only     := getEnvBool(env_smtproxy_TLS13Only,          defaultClientTLS13Only)
+    upstreamTLS13Only   := getEnvBool(env_smtproxy_UpstreamTLS13Only,  defaultUpstreamTLS13Only)
+    skipCertValidation  := getEnvBool(env_smtproxy_SkipCertValidation, defaultSkipCertValidation)
+    sendXCLIENT         := getEnvBool(env_smtproxy_SendXCLIENT,        defaultSendXCLIENT)
+    clientTimeoutSec    := getEnvInt (env_smtproxy_ClientTimeoutSec,   defaultClientTimeoutSec)
+    maxConnections      := getEnvInt64(env_smtproxy_MaxConnections,    defaultMaxConnections)
 
-    gLogLevel          = LogLevel(getEnvInt(env_smtproxy_LogLevel, 0))
-    gLogHandshakeLevel = LogLevel(getEnvInt(env_smtproxy_HandshakeLogLevel, 0))
+    gMaxShutdownSeconds = getEnvInt (env_smtproxy_MaxShutdownSec,              defaultMaxShutdownSeconds)
+    gLogLevel           = LogLevel  (getEnvInt(env_smtproxy_LogLevel,          int(defaultLogLevel)))
+    gLogHandshakeLevel  = LogLevel  (getEnvInt(env_smtproxy_HandshakeLogLevel, int(defaultHandshakeLogLevel)))
+    gMetricListnerAddr  = getEnv    (env_smtproxy_MetricsListenAddr,           defaultMetricsAddr)
 
-    certFile  := getEnv(env_smtproxy_cert_file,  defaultCertFile)
-    keyFile   := getEnv(env_smtproxy_key_file,   defaultKeyFile)
-    certFile2 := getEnv(env_smtproxy_cert_file2, defaultCertFile2)
-    keyFile2  := getEnv(env_smtproxy_key_file2,  defaultKeyFile2)
+    certFile  := getEnv(env_smtproxy_CertFile,  defaultCertFile)
+    keyFile   := getEnv(env_smtproxy_KeyFile,   defaultKeyFile)
+    certFile2 := getEnv(env_smtproxy_CertFile2, defaultCertFile2)
+    keyFile2  := getEnv(env_smtproxy_KeyFile2,  defaultKeyFile2)
 
     routingMode, ErrRoutingMode := ParseRoutingMode(getEnv(env_smtproxy_RoutingMode, ""))
 
@@ -378,16 +459,16 @@ func main() {
     }
 
     if !fileExists (certFile) {
-        log.Fatalf("Certificate file does not exist: %s (%s)", certFile, env_smtproxy_cert_file)
+        log.Fatalf("Certificate file does not exist: %s (%s)", certFile, env_smtproxy_CertFile)
     }
 
     if !fileExists (keyFile) {
-        log.Fatalf("Key file does not exist: %s (%s)", keyFile, env_smtproxy_key_file)
+        log.Fatalf("Key file does not exist: %s (%s)", keyFile, env_smtproxy_KeyFile)
     }
 
     cert, err := tls.LoadX509KeyPair(certFile, keyFile)
     if err != nil {
-        log.Fatalf("Failed to load certificate (%s/%s): %v", env_smtproxy_cert_file, env_smtproxy_key_file, err)
+        log.Fatalf("Failed to load certificate (%s/%s): %v", env_smtproxy_CertFile, env_smtproxy_KeyFile, err)
     }
 
     certs := []tls.Certificate{cert}
@@ -395,16 +476,16 @@ func main() {
     if certFile2 != "" && keyFile2 != "" {
 
         if !fileExists (certFile2) {
-            log.Fatalf("Certificate file does not exist: %s (%s)", certFile2, env_smtproxy_cert_file2)
+            log.Fatalf("Certificate file does not exist: %s (%s)", certFile2, env_smtproxy_CertFile2)
         }
 
         if !fileExists (keyFile2) {
-            log.Fatalf("Key file does not exist: %s (%s)", keyFile2, env_smtproxy_key_file2)
+            log.Fatalf("Key file does not exist: %s (%s)", keyFile2, env_smtproxy_KeyFile2)
         }
 
         cert2, err := tls.LoadX509KeyPair(certFile2, keyFile2)
         if err != nil {
-            log.Fatalf("Failed to load second certificate (%s/%s): %v", env_smtproxy_cert_file2, env_smtproxy_key_file2, err)
+            log.Fatalf("Failed to load second certificate (%s/%s): %v", env_smtproxy_CertFile2, env_smtproxy_KeyFile2, err)
         }
 
         certs = append(certs, cert2)
@@ -427,8 +508,6 @@ func main() {
         log.Fatal("Failed to parse certificates:", err)
     }
 
-    dumpCertificateChain("Server Certificates", x509Certs)
-
     var upstreamMinTLSVersion uint16 = tls.VersionTLS12
     var clientMinTLSVersion   uint16 = tls.VersionTLS12
 
@@ -445,11 +524,6 @@ func main() {
     serverTLS := &tls.Config{
         MinVersion: clientMinTLSVersion,
         PreferServerCipherSuites: true,
-
-        CurvePreferences: []tls.CurveID{
-            tls.X25519,
-            tls.CurveP256,
-        },
 
         GetCertificate: func(chi *tls.ClientHelloInfo) (*tls.Certificate, error) {
 
@@ -565,39 +639,72 @@ func main() {
         }
     }
 
-    fmt.Printf("\n--- SMTP Proxy Configuration ---\n\n")
+    fmt.Printf("\n")
+    fmt.Printf("SMTP Proxy V%s\n", version)
+    fmt.Printf("%s\n\n", dashLine (25))
+    fmt.Printf("%s\n\n\n", copyright)
+    showCfg("Description", "Variable", "Default", "Current")
+    fmt.Printf("%s\n", dashLine (140))
 
-    fmt.Printf("V%s %s\n\n", version, copyright)
+    showCfg("STARTTLS listen address", env_smtproxy_ListenAddr,            formatStr(defaultListenAddr),     cfg.ListenAddr)
+    showCfg("TLS      listen address", env_smtproxy_TlsListenAddr,         formatStr(defaultTlsListenAddr),  cfg.TLSListenAddr)
+    showCfg("Metrics  listen address", env_smtproxy_MetricsListenAddr,     formatStr(defaultMetricsAddr),    gMetricListnerAddr)
 
-    fmt.Printf("STARTTLS Listener       :  %s\n", cfg.ListenAddr)
-    fmt.Printf("TLS Listener            :  %s\n", cfg.TLSListenAddr)
-    fmt.Printf("Local Upstreams         :  %v\n", cfg.LocalUpstreams)
-    fmt.Printf("Remote Upstreams        :  %v\n", cfg.RemoteUpstreams)
-    fmt.Printf("Routing Mode            :  %s\n", cfg.RoutingMode)
-    fmt.Printf("Require TLS             :  %v\n", cfg.RequireTLS)
-    fmt.Printf("Upstream require TLS    :  %v\n", cfg.UpstreamRequireTLS)
-    fmt.Printf("Skip cert validation    :  %v\n", cfg.InsecureSkipVerify)
-    fmt.Printf("TLS13 Only              :  %v\n", cfg.ClientTLS13Only)
-    fmt.Printf("Upstream TLS 1.3 Only   :  %v\n", cfg.UpstreamTLS13Only)
-    fmt.Printf("Upstream implicit TLS   :  %v\n", cfg.UpstreamImplicitTLS)
-    fmt.Printf("Send XCLIENT info       :  %v\n", cfg.SendXCLIENT)
-    fmt.Printf("Client timeout          :  %v\n", cfg.ClientTimeout)
-    fmt.Printf("Max connections         :  %v\n", cfg.MaxConnections)
-    fmt.Printf("Log Level               :  %s (%d)\n", gLogLevel, gLogLevel)
-    fmt.Printf("Handshake Log Level     :  %s (%d)\n", gLogHandshakeLevel, gLogHandshakeLevel)
-    fmt.Printf("Trusted Roots           :  %d\n", len(cfg.TrustedRoots.Subjects()))
-    fmt.Printf("Trust store file        :  %s\n", cfg.TrustStoreFile)
-    fmt.Printf("Certificate file        :  %s\n", cfg.CertFile)
-    fmt.Printf("Private key file        :  %s\n", cfg.KeyFile)
-    fmt.Printf("2nd Certificate file    :  %s\n", cfg.CertFile2)
-    fmt.Printf("2nd Private key file    :  %s\n", cfg.KeyFile2)
-    fmt.Printf("Trusted Roots File      :  %s\n", cfg.TrustStoreFile)
+    showCfg("Routing mode",            env_smtproxy_RoutingMode,           RoutingModeLocalFirst,            cfg.RoutingMode)
+    showCfg("Local  upstreams",        env_smtproxy_LocalUpstreams,        formatStr(defaultLocalUpstream),  cfg.LocalUpstreams)
+    showCfg("Remote upstreams",        env_smtproxy_RemoteUpstreams,       formatStr(defaultRemoteUpstream), cfg.RemoteUpstreams)
+    showCfg("Require TLS",             env_smtproxy_RequireTLS,            defaultRequireTLS,                cfg.RequireTLS)
+    showCfg("Upstream use STARTTLS",   env_smtproxy_UpstreamSTARTTLS,      defaultUpstreamSTARTTLS,          cfg.UpstreamStartTLS)
+    showCfg("Upstream requires TLS",   env_smtproxy_UpstreamRequireTLS,    defaultUpstreamRequireTLS,        cfg.UpstreamRequireTLS)
+    showCfg("Upstream implicit TLS",   env_smtproxy_UpstreamTLS,           defaultUpstreamTLS,               cfg.UpstreamImplicitTLS)
+    showCfg("TLS13 only",              env_smtproxy_TLS13Only,             defaultClientTLS13Only,           cfg.ClientTLS13Only)
+    showCfg("Upstream TLS13 only",     env_smtproxy_UpstreamTLS13Only,     defaultUpstreamTLS13Only,         cfg.UpstreamTLS13Only)
+    showCfg("Skip cert validation",    env_smtproxy_SkipCertValidation,    defaultSkipCertValidation,        cfg.InsecureSkipVerify)
+    showCfg("XCLIENT to signal IP",    env_smtproxy_SendXCLIENT,           defaultSendXCLIENT,               cfg.SendXCLIENT)
+    showCfg("Maximum sessions",        env_smtproxy_MaxConnections,        defaultMaxConnections,            cfg.MaxConnections)
+    showCfg("Trusted root file",       env_smtproxy_TrustedRootFile,       "<System trust stor>",            formatStr(cfg.TrustStoreFile))
+    showCfg("Certificate file",        env_smtproxy_CertFile,              formatStr(defaultCertFile),       formatStr(cfg.CertFile))
+    showCfg("Private key file",        env_smtproxy_KeyFile,               formatStr(defaultKeyFile),        formatStr(cfg.KeyFile))
+    showCfg("Certificate file2",       env_smtproxy_CertFile2,             formatStr(defaultCertFile2),      formatStr(cfg.CertFile2))
+    showCfg("Private key file2",       env_smtproxy_KeyFile2,              formatStr(defaultKeyFile2),       formatStr(cfg.KeyFile2))
+    showCfg("Client timeout (sec)",    env_smtproxy_ClientTimeoutSec,      defaultClientTimeoutSec,          cfg.ClientTimeout)
+    showCfg("Max shutdown time (sec)", env_smtproxy_MaxShutdownSec,        defaultMaxShutdownSeconds,        gMaxShutdownSeconds)
+    showCfg("Log level",               env_smtproxy_LogLevel,              defaultLogLevel,                  gLogLevel)
+    showCfg("Handshake Log level",     env_smtproxy_HandshakeLogLevel,     defaultHandshakeLogLevel,         gLogHandshakeLevel)
+
+    // LATER: showCfg("Server name",             env_smtproxy_ServerName,            formatStr(""),                    "")
+
+    logLevelValues := fmt.Sprintf("%d=%s %d=%s %d=%s %d=%s %d=%s",
+            LOG_NONE,    LOG_NONE,
+            LOG_ERROR,   LOG_ERROR,
+            LOG_INFO,    LOG_INFO,
+            LOG_VERBOSE, LOG_VERBOSE,
+            LOG_DEBUG,   LOG_DEBUG)
+
+    routingModeValues := fmt.Sprintf("[%s|%s|%s]", RoutingModeLocalFirst, RoutingModeFailover, RoutingModeLoadBalance)
 
     fmt.Printf("\n")
+    fmt.Printf("Routing mode values:\n");
+    fmt.Printf("  %s\n", routingModeValues);
+    fmt.Printf("\nLog level values:\n");
+    fmt.Printf("  %s\n", logLevelValues);
+    fmt.Printf("\n");
+
+    showRuntimeInfo()
+    showInfo("Trust Store", len(cfg.TrustedRoots.Subjects()))
+    fmt.Printf("\n");
 
     if  cfg.UpstreamImplicitTLS && cfg.UpstreamRequireTLS {
-        fmt.Printf("Warning: Upstream STARTTLS and implicit TLS cannot be enabled at the same time!\n\n")
+        fmt.Printf("\nWarning: Upstream STARTTLS and implicit TLS cannot be enabled at the same time!\n\n")
     }
+
+    if gLogLevel >= LOG_DEBUG {
+        dumpCertificateChain("Server Certificates", x509Certs, true)
+    } else if gLogLevel >= LOG_VERBOSE {
+        dumpCertificateChain("Server Certificates", x509Certs, false)
+    }
+
+    log.Printf("Starting listeners ...\n\n")
 
     // Plain SMTP listener (STARTTLS capable)
     if cfg.ListenAddr != "" {
@@ -607,13 +714,25 @@ func main() {
                 log.Fatal(err)
             }
 
-            log.Printf("Listening with STARTTLS on %s", cfg.ListenAddr)
+            log.Printf("Listening with STARTTLS on [%s]", cfg.ListenAddr)
 
             for {
                 conn, err := listener.Accept()
+
                 if err != nil {
                     log.Println(err)
                     continue
+                }
+
+                if errors.Is(err, net.ErrClosed) {
+                    log.Printf("STARTTLS listener closed")
+                    break
+                }
+
+                if gShutdownRequested {
+                    log.Printf("STARTTLS listener shutdown")
+                    conn.Close()
+                    break
                 }
 
                 CurrentActiveConnections := atomic.LoadInt64(&gActiveConnections)
@@ -645,6 +764,17 @@ func main() {
                     continue
                 }
 
+                if errors.Is(err, net.ErrClosed) {
+                    log.Printf("TLS listener closed")
+                    break
+                }
+
+                if gShutdownRequested {
+                    log.Printf("TLS listener shutdown")
+                    conn.Close()
+                    break
+                }
+
                 CurrentActiveConnections := atomic.LoadInt64(&gActiveConnections)
                 if  CurrentActiveConnections >= int64(cfg.MaxConnections) {
                     log.Printf("Connection limit reached (%d), rejecting [%s]", cfg.MaxConnections, conn.RemoteAddr())
@@ -661,7 +791,12 @@ func main() {
         }()
     }
 
+    if gMetricListnerAddr != "0" && gMetricListnerAddr != "" {
+        startMetricsListener(gMetricListnerAddr)
+    }
+
     select {}
+
 }
 
 
@@ -782,6 +917,8 @@ func (s *SmtpSession) connectUpstream() error {
             state := tlsConn.ConnectionState()
             s.upstreamTLSVersion = tlsVersionString(state.Version)
             s.upstreamCipher     = tls.CipherSuiteName(state.CipherSuite)
+            s.upstreamCurveID    = state.CurveID.String()
+            s.upstreamTLSMode    = TLSModeImplicit
             s.upstreamTLSResumed = state.DidResume
 
             s.upstream = tlsConn
@@ -795,7 +932,7 @@ func (s *SmtpSession) connectUpstream() error {
             }
 
             s.upstreamTLSMode = TLSModeStartTLS
-            s.logf(LOG_INFO, "Connected to upstream TLS [%s] (%s)", target, tlsInfoString (s.upstreamTLSMode, s.upstreamTLSVersion, s.upstreamCipher, s.upstreamTLSResumed))
+            s.logf(LOG_INFO, "Connected to upstream TLS [%s] (%s)", target, tlsInfoString (s.upstreamTLSMode, s.upstreamTLSVersion, s.upstreamCipher, s.upstreamCurveID, s.upstreamTLSResumed))
 
             return nil
         }
@@ -865,13 +1002,14 @@ func (s *SmtpSession) connectUpstream() error {
             state := tlsConn.ConnectionState()
             s.upstreamTLSVersion = tlsVersionString(state.Version)
             s.upstreamCipher     = tls.CipherSuiteName(state.CipherSuite)
+            s.upstreamCurveID    = state.CurveID.String()
             s.upstreamTLSResumed = state.DidResume
 
             s.upstream = tlsConn
             s.upstreamReader = bufio.NewReader(tlsConn)
             s.upstreamTLSMode = TLSModeStartTLS
 
-            s.logf(LOG_INFO, "Connected STARTTLS upstream [%s] (%s)", target, tlsInfoString (s.upstreamTLSMode, s.upstreamTLSVersion, s.upstreamCipher, s.upstreamTLSResumed))
+            s.logf(LOG_INFO, "Connected STARTTLS upstream [%s] (%s)", target, tlsInfoString (s.upstreamTLSMode, s.upstreamTLSVersion, s.upstreamCipher, s.upstreamCurveID, s.upstreamTLSResumed))
 
             return nil
         }
@@ -908,16 +1046,17 @@ func (s *SmtpSession) handleStartTLS() error {
 
     state := tlsConn.ConnectionState()
     s.clientTLSVersion = tlsVersionString(state.Version)
-    s.clientCipher = tls.CipherSuiteName(state.CipherSuite)
+    s.clientCipher     = tls.CipherSuiteName(state.CipherSuite)
+    s.clientCurveID    = state.CurveID.String()
     s.clientTLSResumed = state.DidResume
 
     s.client = tlsConn
     s.clientReader = bufio.NewReader(tlsConn)
 
-    s.inboundTLS = true
+    s.inboundTLS    = true
     s.clientTLSMode = TLSModeStartTLS
 
-    s.logf(LOG_INFO, "Client STARTTLS established [%s] (%s)", s.clientIP, tlsInfoString(s.clientTLSMode, s.clientTLSVersion, s.clientCipher, s.clientTLSResumed))
+    s.logf(LOG_INFO, "Client STARTTLS established [%s] (%s)", s.clientIP, tlsInfoString(s.clientTLSMode, s.clientTLSVersion, s.clientCipher, s.clientCurveID, s.clientTLSResumed))
 
     return nil
 }
@@ -1037,7 +1176,7 @@ func (s *SmtpSession) sendXCLIENT() {
         clientIP = s.client.RemoteAddr().String()
     }
 
-    cmd := fmt.Sprintf("XCLIENT ADDR=%s TLSVERSION=%s TLSCIPHER=%s\r\n", clientIP, s.clientTLSVersion, s.clientCipher)
+    cmd := fmt.Sprintf("XCLIENT ADDR=%s TLSVERSION=%s TLSCIPHER=%s TLSCURVE=%s\r\n", clientIP, s.clientTLSVersion, s.clientCipher, s.clientCurveID)
 
     s.logf(LOG_VERBOSE, "Sending XCLIENT: %s", strings.TrimSpace(cmd))
 
@@ -1084,13 +1223,14 @@ func (s *SmtpSession) run() {
 
             state := tlsConn.ConnectionState()
             s.clientTLSVersion = tlsVersionString(state.Version)
-            s.clientCipher = tls.CipherSuiteName(state.CipherSuite)
+            s.clientCipher     = tls.CipherSuiteName(state.CipherSuite)
+            s.clientCurveID    = state.CurveID.String()
             s.clientTLSResumed = state.DidResume
 
-            s.inboundTLS = true
+            s.inboundTLS    = true
             s.clientTLSMode = TLSModeImplicit // Client is already TLS connected
 
-            s.logf(LOG_INFO, "Client implicit TLS [%s] (%s)", s.clientIP, tlsInfoString(s.clientTLSMode, s.clientTLSVersion, s.clientCipher, s.clientTLSResumed))
+            s.logf(LOG_INFO, "Client implicit TLS [%s] (%s)", s.clientIP, tlsInfoString(s.clientTLSMode, s.clientTLSVersion, s.clientCipher, s.clientCurveID, s.clientTLSResumed))
         }
     }
 
@@ -1174,6 +1314,8 @@ func handleConnection(client net.Conn, cfg *SmtpProxyCfg, implicitTLS bool) {
     atomic.AddInt64(&gActiveConnections, 1)
     defer atomic.AddInt64(&gActiveConnections, -1)
 
+    atomic.AddInt64(&gTotalConnections, 1)
+
     defer client.Close()
     session := NewSmtpSession(client, cfg, implicitTLS)
     session.run()
@@ -1181,7 +1323,7 @@ func handleConnection(client net.Conn, cfg *SmtpProxyCfg, implicitTLS bool) {
 }
 
 
-func tlsInfoString(mode TLSMode, version, cipher string, resumed bool) string {
+func tlsInfoString(mode TLSMode, version, cipher string, curveID string, resumed bool) string {
 
     if mode == TLSModeNone {
         return mode.String()
@@ -1193,7 +1335,7 @@ func tlsInfoString(mode TLSMode, version, cipher string, resumed bool) string {
         resume = "resumed"
     }
 
-    return fmt.Sprintf("%s %s %s %s", mode, version, cipher, resume)
+    return fmt.Sprintf("%s %s %s %s %s", mode, version, cipher, curveID, resume)
 }
 
 
@@ -1227,6 +1369,7 @@ func (s *SmtpSession) logSessionSummary() {
             s.clientTLSMode,
             s.clientTLSVersion,
             s.clientCipher,
+            s.clientCurveID,
             s.clientTLSResumed,
         ),
         s.upstreamTarget,
@@ -1234,6 +1377,7 @@ func (s *SmtpSession) logSessionSummary() {
             s.upstreamTLSMode,
             s.upstreamTLSVersion,
             s.upstreamCipher,
+            s.upstreamCurveID,
             s.upstreamTLSResumed,
         ),
         statusText,
@@ -1288,7 +1432,7 @@ func getEnvInt(key string, fallback int) int {
 }
 
 
-func GetEnvBool(name string, def bool) bool {
+func getEnvBool(name string, def bool) bool {
     val, exists := os.LookupEnv(name)
     if !exists || val == "" {
         return def
@@ -1303,28 +1447,39 @@ func GetEnvBool(name string, def bool) bool {
 }
 
 
-func dumpCertificateChain(description string, chain []*x509.Certificate) {
+func dumpCertificateChain(description string, chain []*x509.Certificate, showDetails bool) {
+
+    // Only prints basic information from leaf only if showDetails is false 
 
     fmt.Printf("\n")
     fmt.Printf("---------------------------------------------------\n")
-    fmt.Printf("Certificates(%d) %s\n", len(chain), description)
+
+    if showDetails {
+        fmt.Printf("Certificates(%d) %s\n", len(chain), description)
+    } else {
+        fmt.Printf("Leaf Certificate %s\n", description)
+    }
+
     fmt.Printf("---------------------------------------------------\n")
     fmt.Printf("\n")
 
     for i, cert := range chain {
-        fmt.Printf("----- Certificate %d -----\n\n", i)
 
-        if i == 0 {
-            fmt.Printf("%-15s : %s\n", "Type", "Leaf")
-        } else {
-            fmt.Printf("%-15s : %s\n", "Type", "Intermediate/CA")
+        if showDetails {
+            fmt.Printf("----- Certificate %d -----\n\n", i)
+
+            if i == 0 {
+                showInfo("Type", "Leaf")
+            } else {
+                showInfo("Type", "Intermediate/CA")
+            }
         }
 
-        fmt.Printf("%-15s : %s\n", "Subject", cert.Subject.String())
-        fmt.Printf("%-15s : %s\n", "Issuer", cert.Issuer.String())
+        showInfo("Subject", cert.Subject.String())
+        showInfo("Issuer", cert.Issuer.String())
 
         if len(cert.DNSNames) > 0 {
-            fmt.Printf("%-15s : %s\n", "DNS SANs", strings.Join(cert.DNSNames, " "))
+            showInfo("DNS SANs", strings.Join(cert.DNSNames, " "))
         }
 
         if len(cert.IPAddresses) > 0 {
@@ -1333,11 +1488,11 @@ func dumpCertificateChain(description string, chain []*x509.Certificate) {
                 ips[i] = ip.String()
             }
 
-            fmt.Printf("%-15s : %s\n", "IP SANs", strings.Join(ips, " "))
+            showInfo("IP SANs", strings.Join(ips, " "))
         }
 
         if len(cert.EmailAddresses) > 0 {
-            fmt.Printf("%-15s : %s\n", "Email SANs", strings.Join(cert.EmailAddresses, " "))
+            showInfo("Email SANs", strings.Join(cert.EmailAddresses, " "))
         }
 
         if len(cert.URIs) > 0 {
@@ -1346,25 +1501,36 @@ func dumpCertificateChain(description string, chain []*x509.Certificate) {
                 uris[i] = uri.String()
             }
 
-            fmt.Printf("%-15s : %s\n", "URI SANs", strings.Join(uris, " "))
+            showInfo("URI SANs", strings.Join(uris, " "))
         }
 
-        fmt.Printf("%-15s : %s\n", "Serial", cert.SerialNumber.String())
-        fmt.Printf("%-15s : %s\n", "SHA256", formatFingerprintSHA256(cert))
-        fmt.Printf("%-15s : %s\n", "SHA1", formatFingerprintSHA1(cert))
+        if showDetails {
+            showInfo("Serial", cert.SerialNumber.String())
+        }
+        showInfo("SHA256", formatFingerprintSHA256(cert))
 
-        if len(cert.SubjectKeyId) > 0 {
-            fmt.Printf("%-15s : %s\n", "SKI", formatHexWithColon(cert.SubjectKeyId))
+        if showDetails {
+
+            showInfo("SHA1", formatFingerprintSHA1(cert))
+
+            if len(cert.SubjectKeyId) > 0 {
+                showInfo("SKI", formatHexWithColon(cert.SubjectKeyId))
+            }
+
+            if len(cert.AuthorityKeyId) > 0 {
+                showInfo("AKI", formatHexWithColon(cert.AuthorityKeyId))
+            }
+
+            showInfo("NotBefore", cert.NotBefore.Format(time.RFC3339))
         }
 
-        if len(cert.AuthorityKeyId) > 0 {
-            fmt.Printf("%-15s : %s\n", "AKI", formatHexWithColon(cert.AuthorityKeyId))
-        }
-
-        fmt.Printf("%-15s : %s\n", "NotBefore", cert.NotBefore.Format(time.RFC3339))
-        fmt.Printf("%-15s : %s\n", "NotAfter", cert.NotAfter.Format(time.RFC3339))
+        showInfo("NotAfter", cert.NotAfter.Format(time.RFC3339))
 
         fmt.Printf("\n")
+
+        if  false == showDetails {
+            return
+        }
     }
 }
 
@@ -1514,7 +1680,7 @@ func dumpClientHelloInfo(chi *tls.ClientHelloInfo) {
     prefix := "[" + chi.Conn.RemoteAddr().String() + "] "
 
     log.Printf("%s----- TLS ClientHelloInfo -----", prefix)
-    log.Printf("%sClient: %s, SNI: %s", prefix, chi.ServerName)
+    log.Printf("%sClient: SNI: %s", prefix, chi.ServerName)
 
     log.Printf("%s; Supported Versions:", prefix)
     for _, v := range chi.SupportedVersions {
@@ -1560,4 +1726,8 @@ func fileExists(filename string) bool {
 
 func isSMTP2xx(resp string) bool {
     return len(resp) >= 3 && resp[0] == '2'
+}
+
+func dashLine(width int) string {
+    return strings.Repeat("-", width)
 }

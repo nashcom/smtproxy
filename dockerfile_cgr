@@ -1,0 +1,27 @@
+
+FROM cgr.dev/chainguard/go:latest AS builder
+
+WORKDIR /app
+
+COPY go.mod ./
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o smtproxy
+
+# ---- Runtime stage ----
+FROM cgr.dev/chainguard/static:latest
+
+# Copy binary
+COPY --from=builder /app/smtproxy /usr/local/bin/smtproxy
+
+# Run as non-root (Chainguard already provides this user)
+USER nonroot
+
+EXPOSE 25 465 1025 1465
+
+ENTRYPOINT ["/usr/local/bin/smtproxy"]

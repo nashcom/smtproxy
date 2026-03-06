@@ -9,12 +9,82 @@ The proxy is designed to be **simple, fast, and container-friendly**, making it 
 # Environment variables
 
 Because the application is intended to run containerized the configuration leverages environment variables.  
-See [environment variables](smtpoxy_env.md) for supported configuration options.
+Environment variables, their short description and their default and current value are printed at startup.
+
+Copy the `env_template` int `.env` and customize the value to pass them to the container at startup.
+
+
+```
+Variable                            Description                        Default                         Current
+--------------------------------------------------------------------------------------------------------------------------------------------
+SMTPROXY_LISTEN_ADDR                STARTTLS listen address            :1025                           :1025
+SMTPROXY_TLS_LISTEN_ADDR            TLS      listen address            :1465                           :1465
+SMTPROXY_METRICS_LISTEN_ADDR        Metrics  listen address            :9100                           :9100
+SMTPROXY_ROUTING_MODE               Routing mode                       local-first                     local-first
+SMTPROXY_LOCAL_UPSTREAMS            Local  upstreams                   :25                             [:25]
+SMTPROXY_REMOTE_UPSTREAMS           Remote upstreams                   []                              []
+SMTPROXY_REQUIRE_TLS                Require TLS                        true                            true
+SMTPROXY_UPSTREAM_STARTTLS          Upstream use STARTTLS              true                            true
+SMTPROXY_UPSTREAM_REQUIRE_TLS       Upstream requires TLS              true                            true
+SMTPROXY_UPSTREAM_TLS               Upstream implicit TLS              false                           false
+SMTPROXY_TLS13_ONLY                 TLS13 only                         false                           false
+SMTPROXY_UPSTREAM_TLS13_ONLY        Upstream TLS13 only                false                           false
+SMTPROXY_SKIP_CERT_VALIDATION       Skip cert validation               false                           false
+SMTPROXY_SEND_XCLIENT               XCLIENT to signal IP               false                           false
+SMTPROXY_MAX_CONNECTIONS            Maximum sessions                   1000                            1000
+SMTPROXY_TRUSTED_ROOT_FILE          Trusted root file                  <System trust stor>             []
+SMTPROXY_CERT_FILE                  Certificate file                   /tls/tls.crt                    /tls/tls.crt
+SMTPROXY_KEY_FILE                   Private key file                   /tls/tls.key                    /tls/tls.key
+SMTPROXY_CERT_FILE2                 Certificate file2                  []                              []
+SMTPROXY_KEY_FILE2                  Private key file2                  []                              []
+SMTPROXY_CLIENT_TIMEOUT             Client timeout (sec)               120                             2m0s
+SMTPROXY_SHUTDOWN_SECONDS           Max shutdown time (sec)            60                              60
+SMTPROXY_LOGLEVEL                   Log level                          ERROR                           ERROR
+SMTPROXY_HANDSHAKE_LOGLEVEL         Handshake Log level                NONE                            NONE
+
+Routing mode values:
+  [local-first|failover|loadbalance]
+
+Log level values:
+  0=NONE 1=ERROR 2=INFO 3=VERBOSE 4=DEBUG
+
+```
+
+
+# Build the container image
+
+```
+/build.sh
+```
+
+You can also build the binary separately using Go directly if Go is installed
+
+```
+go build
+```
+
+
+# Run on Docker
+
+```
+docker run -d --name smtproxy -p 1025:1025 -p 1465:1465 -v ./tls:/tls smtproxy
+```
+
+## Important parameters
+
+The program requires at least a certificate and key which by default is expected in this location
+
+- /tls/tls.key
+- /tls/tls.crt
+
+For the Docker example a certificate and key are specified via volume mounts
+
 
 # Logging
 
 The application supports multiple log levels and provides a very clean and helpful log format.
 See this [example log document](smtproxy_log_example.md)
+
 
 ## Log level
 
@@ -25,13 +95,6 @@ There are 5 standard log levels from **NONE** to **DEBUG**
 - **2**=INFO
 - **3**=VERBOSE
 - **4**=DEBUG
-
-
-# Run on Docker
-
-```
-docker run -d --name smtproxy -p 1025:1025 -p 1465:1465 -v ./key.pem:/tls/tls.key -v ./cert.pem:/tls/tls.crt smtproxy
-```
 
 
 # Basic Operations

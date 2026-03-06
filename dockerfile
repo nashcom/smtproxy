@@ -15,9 +15,9 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 
 # ---- Runtime image ----
 
-FROM alpine:latest
+FROM alpine
 
-RUN apk add --no-cache openssl ca-certificates
+RUN apk add --no-cache ca-certificates
 
 # Copy binary
 COPY --from=builder /app/smtproxy /usr/local/bin/smtproxy

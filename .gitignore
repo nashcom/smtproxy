@@ -1,2 +1,7 @@
 smtproxy
+smtproxy.exe
 *.pem
+tls/*
+certs/*
+.env
+
