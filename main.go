@@ -29,16 +29,28 @@ type LogLevel int
 type TLSMode  int
 type RoutingMode int
 
+// Global counters
+
 var gSessionCounter   uint64
 var gSessionError     uint64
 var gActiveConnections int64
 var gTotalConnections  int64
+
+// Global variables
 
 var gLogLevel            LogLevel
 var gLogHandshakeLevel   LogLevel
 var gShutdownRequested   bool
 var gMaxShutdownSeconds  int
 var gMetricListnerAddr   string
+var gCertFile            string
+var gKeyFile             string
+var gCertFile2           string
+var gKeyFile2            string
+
+var gCertUpdCheckSec int
+
+var gCertificates atomic.Value // Global CertStore
 
 const (
     TLSModeNone TLSMode = iota
@@ -63,13 +75,8 @@ const (
 type SmtpProxyCfg struct {
     ListenAddr            string
     TLSListenAddr         string
-    RoutingMode           RoutingMode
-
-    CertFile              string
-    KeyFile               string
-    CertFile2             string
-    KeyFile2              string
     TrustStoreFile        string
+    RoutingMode           RoutingMode
 
     LocalUpstreams        []string
     RemoteUpstreams       []string
@@ -272,6 +279,7 @@ const (
     defaultKeyFile2            = ""
     defaultMaxConnections      = 1000
     defaultMaxShutdownSeconds  = 60
+    defaultCertUpdCheckSec     = 300
     defaultLogLevel            = LOG_ERROR
     defaultHandshakeLogLevel   = LOG_NONE
 
@@ -299,6 +307,7 @@ const (
     env_smtproxy_CertFile2          = "SMTPROXY_CERT_FILE2"
     env_smtproxy_KeyFile2           = "SMTPROXY_KEY_FILE2"
     env_smtproxy_MaxShutdownSec     = "SMTPROXY_SHUTDOWN_SECONDS"
+    env_smtproxy_CertUpdCheckSec    = "SMTPROXY_CERT_UPDATE_CHECK_SECONDS"
     env_smtproxy_MetricsListenAddr  = "SMTPROXY_METRICS_LISTEN_ADDR"
 )
 
@@ -393,6 +402,52 @@ func startMetricsListener(addr string) {
     }()
 }
 
+
+func reloadCertificates() error {
+
+    certs, err := loadCertificates()
+    if err != nil {
+        return err
+    }
+
+    gCertificates.Store(certs)
+
+    time.Sleep(time.Second)
+
+    log.Printf("TLS certificates reloaded (%d certs)", len(certs))
+
+    return nil
+}
+
+
+func handleSignals() {
+
+    sigChan := make(chan os.Signal, 1)
+
+    signal.Notify(sigChan,
+        syscall.SIGINT,
+        syscall.SIGTERM,
+        syscall.SIGHUP,
+    )
+
+    for {
+        sig := <-sigChan
+
+        switch sig {
+
+        case syscall.SIGHUP:
+            log.Printf("SIGHUP received - Reloading certificates")
+            reloadCertificates()
+
+        case syscall.SIGINT, syscall.SIGTERM:
+            log.Printf("Shutdown signal received: %v", sig)
+            shutdown()
+            os.Exit(0)
+        }
+    }
+}
+
+
 func main() {
 
     var printVersion   = flag.Bool("version", false, "print version")
@@ -412,16 +467,7 @@ func main() {
         return
     }
 
-    sigChan := make(chan os.Signal, 1)
-
-    signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-    go func() {
-        sig := <-sigChan
-        fmt.Printf("Received signal: %v\n", sig)
-        shutdown()
-        os.Exit(0)
-    }()
+    go handleSignals()
 
     listenAddr          := getEnv(env_smtproxy_ListenAddr,    defaultListenAddr)
     tlsListenAddr       := getEnv(env_smtproxy_TlsListenAddr, defaultTlsListenAddr)
@@ -441,15 +487,17 @@ func main() {
     clientTimeoutSec    := getEnvInt (env_smtproxy_ClientTimeoutSec,   defaultClientTimeoutSec)
     maxConnections      := getEnvInt64(env_smtproxy_MaxConnections,    defaultMaxConnections)
 
-    gMaxShutdownSeconds = getEnvInt (env_smtproxy_MaxShutdownSec,              defaultMaxShutdownSeconds)
+    gMaxShutdownSeconds = getEnvInt (env_smtproxy_MaxShutdownSec,      defaultMaxShutdownSeconds)
+    gCertUpdCheckSec    = getEnvInt (env_smtproxy_CertUpdCheckSec,     defaultCertUpdCheckSec)
+
     gLogLevel           = LogLevel  (getEnvInt(env_smtproxy_LogLevel,          int(defaultLogLevel)))
     gLogHandshakeLevel  = LogLevel  (getEnvInt(env_smtproxy_HandshakeLogLevel, int(defaultHandshakeLogLevel)))
     gMetricListnerAddr  = getEnv    (env_smtproxy_MetricsListenAddr,           defaultMetricsAddr)
 
-    certFile  := getEnv(env_smtproxy_CertFile,  defaultCertFile)
-    keyFile   := getEnv(env_smtproxy_KeyFile,   defaultKeyFile)
-    certFile2 := getEnv(env_smtproxy_CertFile2, defaultCertFile2)
-    keyFile2  := getEnv(env_smtproxy_KeyFile2,  defaultKeyFile2)
+    gCertFile  = getEnv(env_smtproxy_CertFile,  defaultCertFile)
+    gKeyFile   = getEnv(env_smtproxy_KeyFile,   defaultKeyFile)
+    gCertFile2 = getEnv(env_smtproxy_CertFile2, defaultCertFile2)
+    gKeyFile2  = getEnv(env_smtproxy_KeyFile2,  defaultKeyFile2)
 
     routingMode, ErrRoutingMode := ParseRoutingMode(getEnv(env_smtproxy_RoutingMode, ""))
 
@@ -458,55 +506,12 @@ func main() {
             env_smtproxy_RoutingMode, RoutingModeLocalFirst, RoutingModeFailover, RoutingModeLoadBalance, ErrRoutingMode)
     }
 
-    if !fileExists (certFile) {
-        log.Fatalf("Certificate file does not exist: %s (%s)", certFile, env_smtproxy_CertFile)
-    }
-
-    if !fileExists (keyFile) {
-        log.Fatalf("Key file does not exist: %s (%s)", keyFile, env_smtproxy_KeyFile)
-    }
-
-    cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+    certs, err := loadCertificates()
     if err != nil {
-        log.Fatalf("Failed to load certificate (%s/%s): %v", env_smtproxy_CertFile, env_smtproxy_KeyFile, err)
+        log.Fatal(err)
     }
 
-    certs := []tls.Certificate{cert}
-
-    if certFile2 != "" && keyFile2 != "" {
-
-        if !fileExists (certFile2) {
-            log.Fatalf("Certificate file does not exist: %s (%s)", certFile2, env_smtproxy_CertFile2)
-        }
-
-        if !fileExists (keyFile2) {
-            log.Fatalf("Key file does not exist: %s (%s)", keyFile2, env_smtproxy_KeyFile2)
-        }
-
-        cert2, err := tls.LoadX509KeyPair(certFile2, keyFile2)
-        if err != nil {
-            log.Fatalf("Failed to load second certificate (%s/%s): %v", env_smtproxy_CertFile2, env_smtproxy_KeyFile2, err)
-        }
-
-        certs = append(certs, cert2)
-
-        log.Printf("Additional certificate loaded")
-    }
-
-    // Make sure the certificate is parsed already
-    for i := range certs {
-        leaf, err := x509.ParseCertificate(certs[i].Certificate[0])
-        if err != nil {
-            log.Fatal("Failed to parse certificate:", err)
-        }
-
-        certs[i].Leaf = leaf
-    }
-
-    x509Certs, err := tlsCertsToX509(certs)
-    if err != nil {
-        log.Fatal("Failed to parse certificates:", err)
-    }
+    gCertificates.Store(certs)
 
     var upstreamMinTLSVersion uint16 = tls.VersionTLS12
     var clientMinTLSVersion   uint16 = tls.VersionTLS12
@@ -526,6 +531,8 @@ func main() {
         PreferServerCipherSuites: true,
 
         GetCertificate: func(chi *tls.ClientHelloInfo) (*tls.Certificate, error) {
+
+            certs := gCertificates.Load().([]tls.Certificate)
 
             prefix := "[" + chi.Conn.RemoteAddr().String() + "] "
 
@@ -595,11 +602,6 @@ func main() {
         RoutingMode:           routingMode,
         LocalUpstreams:        cleanList(localUpstreams),
         RemoteUpstreams:       cleanList(remoteUpstreams),
-
-        CertFile:              certFile,
-        KeyFile:               keyFile,
-        CertFile2:             certFile2,
-        KeyFile2:              keyFile2,
         TrustStoreFile:        trustStoreFile,
         ServerTLSConfig:       serverTLS,
         RequireTLS:            requireTLS,
@@ -623,7 +625,6 @@ func main() {
         }
 
     } else {
-
 
         if !fileExists (cfg.TrustStoreFile) {
             log.Fatalf("Trusted root file does not exist: %s (%s)", cfg.TrustStoreFile, env_smtproxy_TrustedRootFile)
@@ -663,12 +664,13 @@ func main() {
     showCfg("XCLIENT to signal IP",    env_smtproxy_SendXCLIENT,           defaultSendXCLIENT,               cfg.SendXCLIENT)
     showCfg("Maximum sessions",        env_smtproxy_MaxConnections,        defaultMaxConnections,            cfg.MaxConnections)
     showCfg("Trusted root file",       env_smtproxy_TrustedRootFile,       "<System trust stor>",            formatStr(cfg.TrustStoreFile))
-    showCfg("Certificate file",        env_smtproxy_CertFile,              formatStr(defaultCertFile),       formatStr(cfg.CertFile))
-    showCfg("Private key file",        env_smtproxy_KeyFile,               formatStr(defaultKeyFile),        formatStr(cfg.KeyFile))
-    showCfg("Certificate file2",       env_smtproxy_CertFile2,             formatStr(defaultCertFile2),      formatStr(cfg.CertFile2))
-    showCfg("Private key file2",       env_smtproxy_KeyFile2,              formatStr(defaultKeyFile2),       formatStr(cfg.KeyFile2))
+    showCfg("Certificate file",        env_smtproxy_CertFile,              formatStr(defaultCertFile),       formatStr(gCertFile))
+    showCfg("Private key file",        env_smtproxy_KeyFile,               formatStr(defaultKeyFile),        formatStr(gKeyFile))
+    showCfg("Certificate file2",       env_smtproxy_CertFile2,             formatStr(defaultCertFile2),      formatStr(gCertFile2))
+    showCfg("Private key file2",       env_smtproxy_KeyFile2,              formatStr(defaultKeyFile2),       formatStr(gKeyFile2))
     showCfg("Client timeout (sec)",    env_smtproxy_ClientTimeoutSec,      defaultClientTimeoutSec,          cfg.ClientTimeout)
     showCfg("Max shutdown time (sec)", env_smtproxy_MaxShutdownSec,        defaultMaxShutdownSeconds,        gMaxShutdownSeconds)
+    showCfg("Cert Update Check (sec)", env_smtproxy_CertUpdCheckSec,       defaultCertUpdCheckSec,           gCertUpdCheckSec)
     showCfg("Log level",               env_smtproxy_LogLevel,              defaultLogLevel,                  gLogLevel)
     showCfg("Handshake Log level",     env_smtproxy_HandshakeLogLevel,     defaultHandshakeLogLevel,         gLogHandshakeLevel)
 
@@ -698,11 +700,7 @@ func main() {
         fmt.Printf("\nWarning: Upstream STARTTLS and implicit TLS cannot be enabled at the same time!\n\n")
     }
 
-    if gLogLevel >= LOG_DEBUG {
-        dumpCertificateChain("Server Certificates", x509Certs, true)
-    } else if gLogLevel >= LOG_VERBOSE {
-        dumpCertificateChain("Server Certificates", x509Certs, false)
-    }
+    go watchCertificateFiles()
 
     log.Printf("Starting listeners ...\n\n")
 
@@ -796,7 +794,66 @@ func main() {
     }
 
     select {}
+}
 
+
+func loadCertificates() ([]tls.Certificate, error) {
+
+    if !fileExists(gCertFile) {
+        return nil, fmt.Errorf("certificate file does not exist: %s", gCertFile)
+    }
+
+    if !fileExists(gKeyFile) {
+        return nil, fmt.Errorf("key file does not exist: %s", gKeyFile)
+    }
+
+    cert, err := tls.LoadX509KeyPair(gCertFile, gKeyFile)
+    if err != nil {
+        return nil, fmt.Errorf("failed to load certificate (%s/%s): %v", gCertFile, gKeyFile, err)
+    }
+
+    certs := []tls.Certificate{cert}
+
+    if gCertFile2 != "" && gKeyFile2 != "" {
+
+        if !fileExists(gCertFile2) {
+            return nil, fmt.Errorf("certificate file does not exist: %s", gCertFile2)
+        }
+
+        if !fileExists(gKeyFile2) {
+            return nil, fmt.Errorf("key file does not exist: %s", gKeyFile2)
+        }
+
+        cert2, err := tls.LoadX509KeyPair(gCertFile2, gKeyFile2)
+        if err != nil {
+            return nil, fmt.Errorf("failed to load second certificate (%s/%s): %v", gCertFile2, gKeyFile2, err)
+        }
+
+        certs = append(certs, cert2)
+
+        log.Printf("Additional certificate loaded")
+    }
+
+    // Parse leaf certificates to avoid handshake parsing cost
+    for i := range certs {
+
+        leaf, err := x509.ParseCertificate(certs[i].Certificate[0])
+        if err != nil {
+            return nil, fmt.Errorf("failed to parse certificate: %v", err)
+        }
+
+        certs[i].Leaf = leaf
+    }
+
+    x509Certs, _ := tlsCertsToX509(certs)
+
+    if gLogLevel >= LOG_DEBUG {
+        dumpCertificateChain("Server", x509Certs, true)
+    } else if gLogLevel >= LOG_VERBOSE {
+        dumpCertificateChain("Server", x509Certs, false)
+    }
+
+    return certs, nil
 }
 
 
@@ -1504,6 +1561,9 @@ func dumpCertificateChain(description string, chain []*x509.Certificate, showDet
             showInfo("URI SANs", strings.Join(uris, " "))
         }
 
+        showInfo("Key Usage",     formatKeyUsage    (cert.KeyUsage))
+        showInfo("Ext Key Usage", formatExtKeyUsage (cert.ExtKeyUsage))
+
         if showDetails {
             showInfo("Serial", cert.SerialNumber.String())
         }
@@ -1528,6 +1588,7 @@ func dumpCertificateChain(description string, chain []*x509.Certificate, showDet
 
         fmt.Printf("\n")
 
+        // Only show leaf cert
         if  false == showDetails {
             return
         }
@@ -1581,6 +1642,85 @@ func tlsCertsToX509(certs []tls.Certificate) ([]*x509.Certificate, error) {
     }
 
     return chain, nil
+}
+
+
+func formatKeyUsage(usage x509.KeyUsage) string {
+
+    var list []string
+
+    if usage&x509.KeyUsageDigitalSignature != 0 {
+        list = append(list, "DigitalSignature")
+    }
+    if usage&x509.KeyUsageContentCommitment != 0 {
+        list = append(list, "ContentCommitment")
+    }
+    if usage&x509.KeyUsageKeyEncipherment != 0 {
+        list = append(list, "KeyEncipherment")
+    }
+    if usage&x509.KeyUsageDataEncipherment != 0 {
+        list = append(list, "DataEncipherment")
+    }
+    if usage&x509.KeyUsageKeyAgreement != 0 {
+        list = append(list, "KeyAgreement")
+    }
+    if usage&x509.KeyUsageCertSign != 0 {
+        list = append(list, "CertSign")
+    }
+    if usage&x509.KeyUsageCRLSign != 0 {
+        list = append(list, "CRLSign")
+    }
+    if usage&x509.KeyUsageEncipherOnly != 0 {
+        list = append(list, "EncipherOnly")
+    }
+    if usage&x509.KeyUsageDecipherOnly != 0 {
+        list = append(list, "DecipherOnly")
+    }
+
+    if len(list) == 0 {
+        return "None"
+    }
+
+    return strings.Join(list, ", ")
+}
+
+
+func formatExtKeyUsage(usages []x509.ExtKeyUsage) string {
+
+    var list []string
+
+    for _, u := range usages {
+
+        switch u {
+
+        case x509.ExtKeyUsageServerAuth:
+            list = append(list, "ServerAuth")
+
+        case x509.ExtKeyUsageClientAuth:
+            list = append(list, "ClientAuth")
+
+        case x509.ExtKeyUsageCodeSigning:
+            list = append(list, "CodeSigning")
+
+        case x509.ExtKeyUsageEmailProtection:
+            list = append(list, "EmailProtection")
+
+        case x509.ExtKeyUsageTimeStamping:
+            list = append(list, "TimeStamping")
+
+        case x509.ExtKeyUsageOCSPSigning:
+            list = append(list, "OCSPSigning")
+
+        default:
+            list = append(list, "Unknown")
+        }
+    }
+
+    if len(list) == 0 {
+        return "None"
+    }
+
+    return strings.Join(list, ", ")
 }
 
 
@@ -1731,3 +1871,87 @@ func isSMTP2xx(resp string) bool {
 func dashLine(width int) string {
     return strings.Repeat("-", width)
 }
+
+
+func sleepWithShutdownCheck(n int) bool {
+    for i := 0; i < n; i++ {
+        if gShutdownRequested {
+            return true
+        }
+
+        time.Sleep(time.Second)
+    }
+
+    return false
+}
+
+
+func watchCertificateFiles() {
+
+    type fileState struct {
+        path string
+        mod  time.Time
+    }
+
+    files := []fileState{}
+
+    if gCertFile != "" {
+        files = append(files, fileState{path: gCertFile})
+    }
+
+    if gKeyFile != "" {
+        files = append(files, fileState{path: gKeyFile})
+    }
+
+    if gCertFile2 != "" {
+        files = append(files, fileState{path: gCertFile2})
+    }
+
+    if gKeyFile2 != "" {
+        files = append(files, fileState{path: gKeyFile2})
+    }
+
+    // Initial timestamps
+    for i := range files {
+        if info, err := os.Stat(files[i].path); err == nil {
+            files[i].mod = info.ModTime()
+        }
+    }
+
+    for {
+        changed := false
+
+        for i := range files {
+
+            info, err := os.Stat(files[i].path)
+            if err != nil {
+                continue
+            }
+
+            mod := info.ModTime()
+
+            if mod.After(files[i].mod) {
+
+                log.Printf("Certificate file changed: %s", files[i].path)
+
+                files[i].mod = mod
+                changed = true
+            }
+        }
+
+        if changed {
+
+            // allow tools writing cert+key to finish
+            time.Sleep(1 * time.Second)
+
+            if err := reloadCertificates(); err != nil {
+                log.Printf("Certificate reload failed: %v", err)
+            }
+        }
+
+        if sleepWithShutdownCheck (gCertUpdCheckSec) {
+            break
+        }
+    }
+}
+

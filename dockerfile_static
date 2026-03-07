@@ -1,0 +1,40 @@
+# ---- Build stage ----
+FROM cgr.dev/chainguard/go:latest AS builder
+
+WORKDIR /app
+
+COPY go.mod ./
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o smtproxy
+
+
+# ---- Capability stage ----
+FROM cgr.dev/chainguard/wolfi-base AS cap
+
+RUN apk add --no-cache libcap libcap-utils
+
+COPY --from=builder /app/smtproxy /usr/local/bin/smtproxy
+
+RUN setcap cap_net_bind_service=+ep /usr/local/bin/smtproxy
+
+# optional verification
+RUN getcap /usr/local/bin/smtproxy
+
+
+# ---- Runtime stage ----
+FROM cgr.dev/chainguard/static:latest
+
+# copy the already-prepared file
+COPY --from=cap /usr/local/bin/smtproxy /usr/local/bin/smtproxy
+
+USER nonroot
+
+EXPOSE 25 465 1025 1465
+
+ENTRYPOINT ["/usr/local/bin/smtproxy"]

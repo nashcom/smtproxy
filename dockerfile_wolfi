@@ -1,3 +1,4 @@
+# ---- Build stage ----
 
 FROM cgr.dev/chainguard/go:latest AS builder
 
@@ -14,12 +15,15 @@ RUN CGO_ENABLED=0 go build \
     -o smtproxy
 
 # ---- Runtime stage ----
-FROM cgr.dev/chainguard/static:latest
 
-# Copy binary
+FROM cgr.dev/chainguard/wolfi-base
+
+RUN apk add --no-cache libcap libcap-utils
+
 COPY --from=builder /app/smtproxy /usr/local/bin/smtproxy
 
-# Run as non-root (Chainguard already provides this user)
+RUN setcap cap_net_bind_service=+ep /usr/local/bin/smtproxy
+
 USER nonroot
 
 EXPOSE 25 465 1025 1465

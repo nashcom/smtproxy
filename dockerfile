@@ -17,10 +17,13 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 
 FROM alpine
 
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates libcap
 
 # Copy binary
 COPY --from=builder /app/smtproxy /usr/local/bin/smtproxy
+
+# Allow to bind to ports below 1024
+RUN setcap 'cap_net_bind_service=+ep' /usr/local/bin/smtproxy
 
 USER 1000
 EXPOSE 25 465 1025 1465
