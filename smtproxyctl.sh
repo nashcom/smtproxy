@@ -54,9 +54,14 @@ fi
 
 CONTAINER_NAME=smtproxy
 CONTAINER_NETWORK=bridge
-CONTAINER_PORTS="-p 25:25 -p 465:465"
+CONTAINER_PORTS="-p 25:25 -p 465:465 -p 9100:9100"
 CONTAINER_CMD=docker
+CONTAINER_HOSTNAME=$(hostname -f)
 COMMAND=
+
+if [ -z "$EDITOR" ]; then
+  EDITOR=vi
+fi
 
 for a in "$@"; do
 
@@ -64,7 +69,10 @@ for a in "$@"; do
 
   case "$p" in
 
-    run|stop|rm|remove|logs|log)
+    cfg|run|start|stop|rm|remove|logs|log|bash|sh)
+      if [ ! -e .env ]; then
+        log_error_exit "Please create a .env configuration file via 'cfg' command"
+      fi
       COMMAND=$a
       ;;
 
@@ -73,11 +81,11 @@ for a in "$@"; do
       ;;
 
     -static)
-      CONTAINER_IMAGE="$CONTAINER_IMAGE/static"
+      CONTAINER_IMAGE="$CONTAINER_IMAGE:static"
       ;;
 
     -wolfi)
-      CONTAINER_IMAGE="$CONTAINER_IMAGE/wolfi"
+      CONTAINER_IMAGE="$CONTAINER_IMAGE:wolfi"
       ;;
 
     -image=*)
@@ -113,6 +121,13 @@ case "$COMMAND" in
     echo
     ;;
 
+  cfg)
+      if [ ! -e .env ]; then
+      cp env_template .env
+    fi
+    "$EDITOR" .env
+    ;;
+
   run)
 
     if [ "$CONTAINER_STATUS" = "running" ]; then 
@@ -123,17 +138,29 @@ case "$COMMAND" in
       "$CONTAINER_CMD" rm "$CONTAINER_NAME"
     fi
 
-    "$CONTAINER_CMD" run -d --name "$CONTAINER_NAME" $CONTAINER_PORTS --network "$CONTAINER_NETWORK" --cap-add=NET_BIND_SERVICE --env-file .env -v ./tls:/tls "$CONTAINER_IMAGE"
+    "$CONTAINER_CMD" run -d --name "$CONTAINER_NAME" --hostname $CONTAINER_HOSTNAME $CONTAINER_PORTS --network "$CONTAINER_NETWORK" --cap-add=NET_BIND_SERVICE --env-file .env -v ./tls:/tls "$CONTAINER_IMAGE"
     sleep 2
-
+    "$CONTAINER_CMD" logs "$CONTAINER_NAME"
     ;;
 
   status)
     log "$CONTAINER_STATUS"
     ;;
 
+  start)
+    "$CONTAINER_CMD" start "$CONTAINER_NAME"
+    ;;
+
   stop)
     "$CONTAINER_CMD" stop "$CONTAINER_NAME"
+    ;;
+
+  bash|sh)
+    "$CONTAINER_CMD" exec -it "$CONTAINER_NAME" sh
+    ;;
+
+  root)
+    "$CONTAINER_CMD" exec -it -u 0 "$CONTAINER_NAME" sh
     ;;
 
   logs|log)
@@ -141,6 +168,11 @@ case "$COMMAND" in
     ;;
 
   remove|rm)
+
+    if [ "$CONTAINER_STATUS" = "running" ]; then 
+      "$CONTAINER_CMD" stop "$CONTAINER_NAME"
+    fi
+
     "$CONTAINER_CMD" rm "$CONTAINER_NAME"
     ;;
 
@@ -149,4 +181,3 @@ case "$COMMAND" in
     ;;
 
 esac
-

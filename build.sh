@@ -3,12 +3,10 @@
 # Copyright Nash!Com, Daniel Nashed 2026  - APACHE 2.0 see LICENSE
 ############################################################################
 
-
 CONTAINER_IMAGE=nashcom/smtproxy
 CONTAINER_CMD=docker
 DOCKER_FILE=dockerfile
 IMAGE_DESCRIPTION=Alpine
-
 
 
 print_delim()
@@ -68,7 +66,8 @@ case "$1" in
     ;;
 
   *)
-    echo "Invalid parameter [$a]"
+    echo "Invalid parameter [$1]"
+    exit 1
     ;;
 esac
 
@@ -81,4 +80,3 @@ header "Building smtproxy image - $IMAGE_DESCRIPTION / $CONTAINER_IMAGE"
 echo
 print_runtime
 echo
-

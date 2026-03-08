@@ -2,16 +2,11 @@ FROM golang:alpine AS builder
 
 WORKDIR /app
 
-# Copy go module files first (better layer caching)
-COPY go.mod ./
-RUN go mod download
-
 # Copy source
-COPY main.go .
+COPY . .
 
 # Build static binary
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -trimpath -ldflags="-s -w" -o smtproxy
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.gBuildPlatform=alpine" -o smtproxy
 
 # ---- Runtime image ----
 

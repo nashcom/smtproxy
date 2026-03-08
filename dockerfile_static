@@ -3,15 +3,9 @@ FROM cgr.dev/chainguard/go:latest AS builder
 
 WORKDIR /app
 
-COPY go.mod ./
-RUN go mod download
-
 COPY . .
 
-RUN CGO_ENABLED=0 go build \
-    -trimpath \
-    -ldflags="-s -w" \
-    -o smtproxy
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.gBuildPlatform=static" -o smtproxy
 
 
 # ---- Capability stage ----
