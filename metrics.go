@@ -83,15 +83,6 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
     activeConnections := atomic.LoadInt64(&gActiveConnections)
     totalConnections  := atomic.LoadInt64(&gTotalConnections)
 
-    if gRdnsResolver != nil {
-        rdnsCacheHitsTotal       := gRdnsResolver.cacheHits.Load()
-        rdnsCacheMissesTotal     := gRdnsResolver.cacheMisses.Load()
-        rdnsDnsQueriesTotal      := gRdnsResolver.dnsQueries.Load()
-        rdnsDnsTimeoutsTotal     := gRdnsResolver.dnsTimeouts.Load()
-        rdnsDnsErrorsTotal       := gRdnsResolver.dnsErrors.Load()
-        rdnsDnsQuerySecondsTotal := float64(gRdnsResolver.dnsQueryTime.Load()) / 1e9
-    }
-
     w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 
     bw := bufio.NewWriter(w)
@@ -134,60 +125,6 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 
     writeMetric(
         bw,
-        "smtpproxy_rdns_cache_hits_total",
-        "Total reverse DNS cache hits",
-        "counter",
-        rdnsCacheHitsTotal,
-        nil,
-    )
-
-    writeMetric(
-        bw,
-        "smtpproxy_rdns_cache_misses_total",
-        "Total reverse DNS cache misses",
-        "counter",
-        rdnsCacheMissesTotal,
-        nil,
-    )
-
-    writeMetric(
-        bw,
-        "smtpproxy_rdns_dns_queries_total",
-        "Total reverse DNS DNS queries performed",
-        "counter",
-        rdnsDnsQueriesTotal,
-        nil,
-    )
-
-    writeMetric(
-        bw,
-        "smtpproxy_rdns_dns_timeouts_total",
-        "Total reverse DNS DNS query timeouts",
-        "counter",
-        rdnsDnsTimeoutsTotal,
-        nil,
-    )
-
-    writeMetric(
-        bw,
-        "smtpproxy_rdns_dns_errors_total",
-        "Total reverse DNS DNS query errors",
-        "counter",
-        rdnsDnsErrorsTotal,
-        nil,
-    )
-
-    writeMetricFloat(
-        bw,
-        "smtpproxy_rdns_dns_query_seconds_total",
-        "Total time spent performing reverse DNS lookups",
-        "counter",
-        rdnsDnsQuerySecondsTotal,
-        nil,
-    )
-
-    writeMetric(
-        bw,
         "smtpproxy_tls_cert_expiry_timestamp_seconds",
         "Earliest TLS certificate expiration time (Unix epoch seconds)",
         "gauge",
@@ -203,6 +140,72 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
         gConfigErrors,
         nil,
     )
+
+
+    if gRdnsResolver != nil {
+
+        rdnsCacheHitsTotal       := gRdnsResolver.cacheHits.Load()
+        rdnsCacheMissesTotal     := gRdnsResolver.cacheMisses.Load()
+        rdnsDnsQueriesTotal      := gRdnsResolver.dnsQueries.Load()
+        rdnsDnsTimeoutsTotal     := gRdnsResolver.dnsTimeouts.Load()
+        rdnsDnsErrorsTotal       := gRdnsResolver.dnsErrors.Load()
+        rdnsDnsQuerySecondsTotal := float64(gRdnsResolver.dnsQueryTime.Load()) / 1e9
+
+
+        writeMetric(
+            bw,
+            "smtpproxy_rdns_cache_hits_total",
+            "Total reverse DNS cache hits",
+            "counter",
+            rdnsCacheHitsTotal,
+            nil,
+        )
+
+        writeMetric(
+            bw,
+            "smtpproxy_rdns_cache_misses_total",
+            "Total reverse DNS cache misses",
+            "counter",
+            rdnsCacheMissesTotal,
+            nil,
+        )
+
+        writeMetric(
+            bw,
+            "smtpproxy_rdns_dns_queries_total",
+            "Total reverse DNS DNS queries performed",
+            "counter",
+            rdnsDnsQueriesTotal,
+            nil,
+        )
+
+        writeMetric(
+            bw,
+            "smtpproxy_rdns_dns_timeouts_total",
+            "Total reverse DNS DNS query timeouts",
+            "counter",
+            rdnsDnsTimeoutsTotal,
+            nil,
+        )
+
+        writeMetric(
+            bw,
+            "smtpproxy_rdns_dns_errors_total",
+            "Total reverse DNS DNS query errors",
+            "counter",
+            rdnsDnsErrorsTotal,
+            nil,
+        )
+
+        writeMetricFloat(
+            bw,
+            "smtpproxy_rdns_dns_query_seconds_total",
+            "Total time spent performing reverse DNS lookups",
+            "counter",
+            rdnsDnsQuerySecondsTotal,
+            nil,
+        )
+    }
 
     bw.Flush()
 }
