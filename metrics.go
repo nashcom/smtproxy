@@ -81,14 +81,16 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 
     // Load values first
     activeConnections := atomic.LoadInt64(&gActiveConnections)
-    totalConnections := atomic.LoadInt64(&gTotalConnections)
+    totalConnections  := atomic.LoadInt64(&gTotalConnections)
 
-    rdnsCacheHitsTotal := gRdnsResolver.cacheHits.Load()
-    rdnsCacheMissesTotal := gRdnsResolver.cacheMisses.Load()
-    rdnsDnsQueriesTotal := gRdnsResolver.dnsQueries.Load()
-    rdnsDnsTimeoutsTotal := gRdnsResolver.dnsTimeouts.Load()
-    rdnsDnsErrorsTotal := gRdnsResolver.dnsErrors.Load()
-    rdnsDnsQuerySecondsTotal := float64(gRdnsResolver.dnsQueryTime.Load()) / 1e9
+    if gRdnsResolver != nil {
+        rdnsCacheHitsTotal       := gRdnsResolver.cacheHits.Load()
+        rdnsCacheMissesTotal     := gRdnsResolver.cacheMisses.Load()
+        rdnsDnsQueriesTotal      := gRdnsResolver.dnsQueries.Load()
+        rdnsDnsTimeoutsTotal     := gRdnsResolver.dnsTimeouts.Load()
+        rdnsDnsErrorsTotal       := gRdnsResolver.dnsErrors.Load()
+        rdnsDnsQuerySecondsTotal := float64(gRdnsResolver.dnsQueryTime.Load()) / 1e9
+    }
 
     w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 

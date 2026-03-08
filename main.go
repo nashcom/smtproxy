@@ -521,8 +521,17 @@ func main() {
     }
 
     certs, err := loadCertificates()
+
+    // For now log errors but don't terminate
+
     if err != nil {
-        log.Fatal(err)
+        gConfigErrors++
+        s.logf(LOG_ERROR, "Failed to load certificates: %v", err)
+    }
+
+    if len(certs) == 0 {
+        gConfigErrors++
+        s.logf(LOG_ERROR, "No certificates found")
     }
 
     gCertificates.Store(certs)
