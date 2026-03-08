@@ -5,11 +5,15 @@ package main
 
 import (
     "crypto/tls"
+    "errors"
     "fmt"
+    "io"
     "log"
+    "net"
     "os"
     "strconv"
     "strings"
+    "syscall"
     "time"
 )
 
@@ -249,14 +253,36 @@ func dumpClientHelloInfo(chi *tls.ClientHelloInfo) {
     }
 }
 
+
 func isClosedNetErr(err error) bool {
+
     if err == nil {
         return false
     }
 
+    if errors.Is(err, io.EOF) {
+        return true
+    }
+
+    if errors.Is(err, syscall.EPIPE) {
+        return true
+    }
+
+    if errors.Is(err, net.ErrClosed) {
+        return true
+    }
+
     s := err.Error()
-    // Common Go/net error when one goroutine closes the socket while another is blocked in Read
-    return strings.Contains(s, "Use of closed network connection")
+
+    if strings.Contains(s, "use of closed network connection") {
+        return true
+    }
+
+    if strings.Contains(s, "connection reset by peer") {
+        return true
+    }
+
+    return false
 }
 
 func tlsResumeString(resumed bool) string {

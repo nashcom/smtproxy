@@ -1215,30 +1215,54 @@ func (s *SmtpSession) startTunnel() {
 
     done := make(chan tunnelResult, 2)
 
+    clientTCP,   _ := s.client.(*net.TCPConn)
+    upstreamTCP, _ := s.upstream.(*net.TCPConn)
+
     // Client -> Upstream
     go func() {
         n, err := io.Copy(s.upstream, s.client)
-        done <- tunnelResult{dir: "client-upstream", bytes: n, err: err}
+
+        if upstreamTCP != nil {
+            _ = upstreamTCP.CloseWrite()
+        }
+
+        done <- tunnelResult{
+            dir:   "client-upstream",
+            bytes: n,
+            err:   err,
+        }
     }()
 
     // Upstream -> Client
     go func() {
         n, err := io.Copy(s.client, s.upstream)
-        done <- tunnelResult{dir: "upstream-client", bytes: n, err: err}
+
+        if clientTCP != nil {
+            _ = clientTCP.CloseWrite()
+        }
+
+        done <- tunnelResult{
+            dir:   "upstream-client",
+            bytes: n,
+            err:   err,
+        }
     }()
 
+
     r1 := <-done
+
+    if clientTCP != nil {
+        _ = clientTCP.CloseRead()
+    }
+
+    if upstreamTCP != nil {
+        _ = upstreamTCP.CloseRead()
+    }
 
     _ = s.client.Close()
     _ = s.upstream.Close()
 
-    var r2 *tunnelResult
-
-    select {
-    case rr := <-done:
-        r2 = &rr
-    case <-time.After(2 * time.Second):
-    }
+    r2 := <-done
 
     apply := func(r tunnelResult) {
 
@@ -1256,10 +1280,7 @@ func (s *SmtpSession) startTunnel() {
     }
 
     apply(r1)
-
-    if r2 != nil {
-        apply(*r2)
-    }
+    apply(r2)
 }
 
 func (s *SmtpSession) sendXCLIENT() {
