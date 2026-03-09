@@ -10,6 +10,7 @@ import (
     "net/http"
     "strconv"
     "sync/atomic"
+    "time"
 )
 
 func writeMetricString(w *bufio.Writer, name string, help string, metricType string, value string, labels map[string]string) {
@@ -123,10 +124,18 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
         nil,
     )
 
+    expiry := time.Unix(gCertExpiration, 0)
+    days := int(time.Until(expiry).Hours() / 24)
+
+    helpExpiration := fmt.Sprintf(
+        "Earliest TLS certificate expiration time (Unix epoch seconds, %s, %d days remaining)",
+        expiry.Format(time.RFC3339),
+        days)
+
     writeMetric(
         bw,
         "smtpproxy_tls_cert_expiry_timestamp_seconds",
-        "Earliest TLS certificate expiration time (Unix epoch seconds)",
+        helpExpiration,
         "gauge",
         gCertExpiration,
         nil,
