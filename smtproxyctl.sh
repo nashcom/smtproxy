@@ -57,6 +57,7 @@ CONTAINER_NETWORK=bridge
 CONTAINER_PORTS="-p 25:25 -p 465:465 -p 9100:9100"
 CONTAINER_CMD=docker
 CONTAINER_HOSTNAME=$(hostname -f)
+#CONTAINER_VOLUMES="-v ./tls:/tls"
 COMMAND=
 
 if [ -z "$EDITOR" ]; then
@@ -138,7 +139,7 @@ case "$COMMAND" in
       "$CONTAINER_CMD" rm "$CONTAINER_NAME"
     fi
 
-    "$CONTAINER_CMD" run -d --name "$CONTAINER_NAME" --hostname $CONTAINER_HOSTNAME $CONTAINER_PORTS --network "$CONTAINER_NETWORK" --cap-add=NET_BIND_SERVICE --env-file .env -v ./tls:/tls "$CONTAINER_IMAGE"
+    "$CONTAINER_CMD" run -d --name "$CONTAINER_NAME" --hostname $CONTAINER_HOSTNAME $CONTAINER_PORTS --network "$CONTAINER_NETWORK" --cap-add=NET_BIND_SERVICE --env-file .env $CONTAINER_VOLUMES "$CONTAINER_IMAGE"
     sleep 2
     "$CONTAINER_CMD" logs "$CONTAINER_NAME"
     ;;

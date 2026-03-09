@@ -15,14 +15,17 @@ Copy the `env_template` int `.env` and customize the value to pass them to the c
 
 
 ```
+
 Variable                            Description                        Default                         Current
 --------------------------------------------------------------------------------------------------------------------------------------------
-SMTPROXY_LISTEN_ADDR                STARTTLS listen address            :1025                           :1025
-SMTPROXY_TLS_LISTEN_ADDR            TLS      listen address            :1465                           :1465
+SMTPROXY_SERVER_NAME                Server name                        <OS Hostname>                   mailprox.example.com
+SMTPROXY_LISTEN_ADDR                STARTTLS listen address            :25                             :25
+SMTPROXY_TLS_LISTEN_ADDR            TLS      listen address            :465                            :465
 SMTPROXY_METRICS_LISTEN_ADDR        Metrics  listen address            :9100                           :9100
 SMTPROXY_ROUTING_MODE               Routing mode                       local-first                     local-first
-SMTPROXY_LOCAL_UPSTREAMS            Local  upstreams                   :25                             [:25]
+SMTPROXY_LOCAL_UPSTREAMS            Local  upstreams                   :25                             [mail.example.com:25]
 SMTPROXY_REMOTE_UPSTREAMS           Remote upstreams                   []                              []
+SMTPROXY_DNS_SERVERS                DNS Servers                        []                              [1.2.3.4]
 SMTPROXY_REQUIRE_TLS                Require TLS                        true                            true
 SMTPROXY_UPSTREAM_STARTTLS          Upstream use STARTTLS              true                            true
 SMTPROXY_UPSTREAM_REQUIRE_TLS       Upstream requires TLS              true                            true
@@ -32,13 +35,12 @@ SMTPROXY_UPSTREAM_TLS13_ONLY        Upstream TLS13 only                false    
 SMTPROXY_SKIP_CERT_VALIDATION       Skip cert validation               false                           false
 SMTPROXY_SEND_XCLIENT               XCLIENT to signal IP               false                           false
 SMTPROXY_MAX_CONNECTIONS            Maximum sessions                   1000                            1000
-SMTPROXY_TRUSTED_ROOT_FILE          Trusted root file                  <System trust stor>             []
-SMTPROXY_CERT_FILE                  Certificate file                   /tls/tls.crt                    /tls/tls.crt
-SMTPROXY_KEY_FILE                   Private key file                   /tls/tls.key                    /tls/tls.key
-SMTPROXY_CERT_FILE2                 Certificate file2                  []                              []
-SMTPROXY_KEY_FILE2                  Private key file2                  []                              []
+SMTPROXY_TRUSTED_ROOT_FILE          Trusted root file                  <System trust store>            []
+SMTPROXY_CERT_DIR                   Certificate directory              /tls                            /tls
+SMTPROXY_MICROCA_CURVE_NAME         Optional MicroCA CurveName         []                              []
 SMTPROXY_CLIENT_TIMEOUT             Client timeout (sec)               120                             2m0s
 SMTPROXY_SHUTDOWN_SECONDS           Max shutdown time (sec)            60                              60
+SMTPROXY_CERT_UPDATE_CHECK_SECONDS  Cert Update Check (sec)            300                             300
 SMTPROXY_LOGLEVEL                   Log level                          ERROR                           ERROR
 SMTPROXY_HANDSHAKE_LOGLEVEL         Handshake Log level                NONE                            NONE
 
@@ -46,7 +48,8 @@ Routing mode values:
   [local-first|failover|loadbalance]
 
 Log level values:
-  0=NONE 1=ERROR 2=INFO 3=VERBOSE 4=DEBUG
+  3=NONE 4=ERROR 5=INFO 6=VERBOSE 7=DEBUG
+
 
 ```
 
@@ -57,33 +60,43 @@ Log level values:
 /build.sh
 ```
 
-You can also build the binary separately using Go directly if Go is installed
-
-```
-go build
-```
+This build command creates the container image using the standard Alpine build.
+For additional build options check [Build alternative images](docs/build.md).
 
 
 # Run on Docker
 
 ```
-docker run -d --name smtproxy -p 1025:1025 -p 1465:1465 -v ./tls:/tls smtproxy
+docker run -d --name smtproxy -p 25:25 -p 465:465 -v ./tls:/tls smtproxy
 ```
 
 ## Important parameters
 
-The program requires at least a certificate and key which by default is expected in this location
-
-- /tls/tls.key
-- /tls/tls.crt
-
+The program requires at least a certificate and key which by default is expected in the `/tls`directory
 For the Docker example a certificate and key are specified via volume mounts
+
+Certificates and keys need to provided in PEM format and need to have the follwing extensions:
+
+- **.key** Unencrypted PEM RSA or ECDSA key
+- **.crt** Leaf certificate and full chain in PEM format
+
+The .key and .crt file must match by name
+
+Example:
+
+- server.key
+- server.crt
+
+If no certificate/key is found, a Micro CA is created and a new key and certificate is created for the server host name.
+By default the certificate is a RSA key and can be optionally changed to an ECDSA key.
+
+To generate an ECDSA key use `SMTPROXY_MICROCA_CURVE_NAME=P256`
 
 
 # Logging
 
 The application supports multiple log levels and provides a very clean and helpful log format.
-See this [example log document](smtproxy_log_example.md)
+See this [example log document](docs/smtproxy_log_example.md)
 
 
 ## Log level

@@ -16,6 +16,7 @@ import (
     "net"
     "os"
     "os/signal"
+    "path/filepath"
     "runtime"
     "strings"
     "sync"
@@ -33,6 +34,12 @@ const (
 
     copyright = "Copyright 2026 Nash!Com/Daniel Nashed. All rights reserved."
 
+    MICRO_CA_DIRECTORY         = "microca"
+    MICRO_CA_CERT_FILE         = "microca.crt"
+    MICRO_CA_KEY_FILE          = "microca.key"
+    SERVER_CERT_FILE           = "server.crt"
+    SERVER_KEY_FILE            = "server.key"
+
     defaultListenAddr          = ":1025"
     defaultTlsListenAddr       = ":1465"
     defaultLocalUpstream       = ":25"
@@ -49,10 +56,7 @@ const (
     defaultSendXCLIENT         = false
     defaultCfgCheckIntervalSec = 120
     defaultClientTimeoutSec    = 120
-    defaultCertFile            = "/tls/tls.crt"
-    defaultKeyFile             = "/tls/tls.key"
-    defaultCertFile2           = ""
-    defaultKeyFile2            = ""
+    defaultCertDir             = "/tls"
     defaultMaxConnections      = 1000
     defaultMaxShutdownSeconds  = 60
     defaultCertUpdCheckSec     = 300
@@ -80,12 +84,7 @@ const (
     env_smtproxy_HandshakeLogLevel  = "SMTPROXY_HANDSHAKE_LOGLEVEL"
     env_smtproxy_ClientTimeoutSec   = "SMTPROXY_CLIENT_TIMEOUT"
     env_smtproxy_MaxConnections     = "SMTPROXY_MAX_CONNECTIONS"
-    env_smtproxy_CertFile           = "SMTPROXY_CERT_FILE"
-    env_smtproxy_KeyFile            = "SMTPROXY_KEY_FILE"
-    env_smtproxy_CertFile2          = "SMTPROXY_CERT_FILE2"
-    env_smtproxy_KeyFile2           = "SMTPROXY_KEY_FILE2"
-    env_smtproxy_MicroCaCertFile    = "SMTPROXY_MICROCA_CERT_FILE"
-    env_smtproxy_MicroCaKeyFile     = "SMTPROXY_MICROCA_KEY_FILE"
+    env_smtproxy_CertDir            = "SMTPROXY_CERT_DIR"
     env_smtproxy_MicroCaCurveName   = "SMTPROXY_MICROCA_CURVE_NAME"
 
     env_smtproxy_MaxShutdownSec     = "SMTPROXY_SHUTDOWN_SECONDS"
@@ -155,6 +154,9 @@ var gBuildPlatform = "unknown"
 // Global variables
 
 var (
+
+    gMicroCAName = "smtproxy-MicroCA"
+
     gLogLevel          LogLevel
     gLogHandshakeLevel LogLevel
 
@@ -163,14 +165,9 @@ var (
 
     gMetricListnerAddr string
     gServerName string
-    gCertFile   string
-    gKeyFile    string
-    gCertFile2  string
-    gKeyFile2   string
+    gCertDir    string
 
     gMicroCACurveName string
-    gMicroCaCertFile  string
-    gMicroCaKeyFile   string
 
     gCertUpdCheckSec int
 
@@ -444,6 +441,43 @@ func handleSignals() {
     }
 }
 
+func CreateMicroCAandCert() {
+
+    count, _ := countFilesWithExtension(gCertDir, ".crt")
+    if count > 0 {
+        log.Printf("%d certificate(s) in %s", count, gCertDir)
+        return
+    }
+
+    microCADir := filepath.Join(gCertDir, MICRO_CA_DIRECTORY)
+
+    log.Printf("Creating MicroCA in %s", gCertDir)
+
+    err := os.MkdirAll(microCADir, 0700)
+    if err != nil {
+        log.Printf("ERROR: Failed to create MicroCA directory %s: %v", microCADir, err)
+        return
+    }
+
+    CAKeyFile := filepath.Join(microCADir, MICRO_CA_KEY_FILE)
+    CACertFile := filepath.Join(microCADir, MICRO_CA_CERT_FILE)
+
+    KeyFile := filepath.Join(gCertDir, SERVER_KEY_FILE)
+    CertFile := filepath.Join(gCertDir, SERVER_CERT_FILE)
+
+    CreateCertAndKey(
+        gServerName,
+        gServerName,
+        gMicroCAName,
+        CAKeyFile,
+        CACertFile,
+        KeyFile,
+        CertFile,
+        gMicroCACurveName,
+        true,
+    )
+}
+
 func main() {
 
     var err error
@@ -488,13 +522,7 @@ func main() {
     gMetricListnerAddr  = getEnv(env_smtproxy_MetricsListenAddr,          defaultMetricsAddr)
     gLogLevel           = getEnvLogLevel(env_smtproxy_LogLevel,           defaultLogLevel)
     gLogHandshakeLevel  = getEnvLogLevel(env_smtproxy_HandshakeLogLevel,  defaultHandshakeLogLevel)
-
-    gCertFile           = getEnv(env_smtproxy_CertFile,   defaultCertFile)
-    gKeyFile            = getEnv(env_smtproxy_KeyFile,    defaultKeyFile)
-    gCertFile2          = getEnv(env_smtproxy_CertFile2,  defaultCertFile2)
-    gKeyFile2           = getEnv(env_smtproxy_KeyFile2,   defaultKeyFile2)
-    gMicroCaCertFile    = getEnv(env_smtproxy_MicroCaCertFile,  "")
-    gMicroCaKeyFile     = getEnv(env_smtproxy_MicroCaKeyFile,   "")
+    gCertDir            = getEnv(env_smtproxy_CertDir,    defaultCertDir)
     gMicroCACurveName   = getEnv(env_smtproxy_MicroCaCurveName, "")
     gDNSServers         = cleanList(strings.Split(getEnv(env_smtproxy_DNSServers, defaultDNSServers), ","))
     gServerName         = getEnv(env_smtproxy_ServerName, "")
@@ -515,10 +543,7 @@ func main() {
             env_smtproxy_RoutingMode, RoutingModeLocalFirst, RoutingModeFailover, RoutingModeLoadBalance, ErrRoutingMode)
     }
 
-    // Create MicroCA and certs if requested
-    if gMicroCaCertFile != "" && gMicroCaKeyFile != "" { 
-        CreateCertAndKey(gServerName, gServerName, "smtproxy-MicroCA", gMicroCaKeyFile, gMicroCaCertFile, gKeyFile, gCertFile, gMicroCACurveName, true)
-    }
+    CreateMicroCAandCert()
 
     certs, err := loadCertificates()
 
@@ -689,12 +714,7 @@ func main() {
     showCfg("XCLIENT to signal IP",       env_smtproxy_SendXCLIENT,         defaultSendXCLIENT,                cfg.SendXCLIENT)
     showCfg("Maximum sessions",           env_smtproxy_MaxConnections,      defaultMaxConnections,             cfg.MaxConnections)
     showCfg("Trusted root file",          env_smtproxy_TrustedRootFile,     "<System trust store>",            formatStr(cfg.TrustStoreFile))
-    showCfg("Certificate file",           env_smtproxy_CertFile,            formatStr(defaultCertFile),        formatStr(gCertFile))
-    showCfg("Private key file",           env_smtproxy_KeyFile,             formatStr(defaultKeyFile),         formatStr(gKeyFile))
-    showCfg("Certificate file2",          env_smtproxy_CertFile2,           formatStr(defaultCertFile2),       formatStr(gCertFile2))
-    showCfg("Private key file2",          env_smtproxy_KeyFile2,            formatStr(defaultKeyFile2),        formatStr(gKeyFile2))
-    showCfg("Optional MicroCA cert file", env_smtproxy_MicroCaCertFile,     formatStr(""),                     gMicroCaCertFile)
-    showCfg("Optional MicroCA key file",  env_smtproxy_MicroCaKeyFile,      formatStr(""),                     gMicroCaKeyFile)
+    showCfg("Certificate directory",      env_smtproxy_CertDir,             formatStr(defaultCertDir),         formatStr(gCertDir))
     showCfg("Optional MicroCA CurveName", env_smtproxy_MicroCaCurveName,    formatStr(""),                     gMicroCACurveName)
     showCfg("Client timeout (sec)",       env_smtproxy_ClientTimeoutSec,    defaultClientTimeoutSec,           cfg.ClientTimeout)
     showCfg("Max shutdown time (sec)",    env_smtproxy_MaxShutdownSec,      defaultMaxShutdownSeconds,         gMaxShutdownSeconds)
@@ -743,6 +763,9 @@ func main() {
     }
 
     fmt.Printf("\n")
+
+    // Wait a second to let all the output flow before starting listeners
+    time.Sleep(1 * time.Second)
 
     go watchCertificateFiles()
 
@@ -841,78 +864,64 @@ func main() {
 }
 
 func loadCertificates() ([]tls.Certificate, error) {
+    pattern := filepath.Join(gCertDir, "*.crt")
 
-    if !fileExists(gCertFile) {
-        gConfigErrors++
-        return nil, fmt.Errorf("certificate file does not exist: %s", gCertFile)
-    }
-
-    if !fileExists(gKeyFile) {
-        gConfigErrors++
-        return nil, fmt.Errorf("key file does not exist: %s", gKeyFile)
-    }
-
-    cert, err := tls.LoadX509KeyPair(gCertFile, gKeyFile)
+    crtFiles, err := filepath.Glob(pattern)
     if err != nil {
+        return nil, fmt.Errorf("Failed to scan certificate directory %s: %v", gCertDir, err)
+    }
+
+    if len(crtFiles) == 0 {
         gConfigErrors++
-        return nil, fmt.Errorf("failed to load certificate [%s] or key [%s]: %v", gCertFile, gKeyFile, err)
+        return nil, fmt.Errorf("No certificate files found in %s", gCertDir)
     }
 
-    certs := []tls.Certificate{cert}
-
-    if gCertFile2 != "" && gKeyFile2 != "" {
-
-        if !fileExists(gCertFile2) {
-            gConfigErrors++
-            return nil, fmt.Errorf("certificate file does not exist: %s", gCertFile2)
-        }
-
-        if !fileExists(gKeyFile2) {
-            gConfigErrors++
-            return nil, fmt.Errorf("key file does not exist: %s", gKeyFile2)
-        }
-
-        cert2, err := tls.LoadX509KeyPair(gCertFile2, gKeyFile2)
-        if err != nil {
-            gConfigErrors++
-            return nil, fmt.Errorf("failed to load second certificate [%s] or key [%s]: %v", gCertFile2, gKeyFile2, err)
-        }
-
-        certs = append(certs, cert2)
-
-        log.Printf("Additional certificate loaded")
-    }
-
+    var certs []tls.Certificate
     var minExpiration int64
 
-    // Parse leaf certificates to avoid handshake parsing cost
-    for i := range certs {
+    for _, certFile := range crtFiles {
 
-        leaf, err := x509.ParseCertificate(certs[i].Certificate[0])
-        if err != nil {
-            return nil, fmt.Errorf("failed to parse certificate: %v", err)
+        keyFile := strings.TrimSuffix(certFile, ".crt") + ".key"
+
+        if !fileExists(keyFile) {
+            gConfigErrors++
+            log.Printf("Skipping certificate %s (missing key file %s)", certFile, keyFile)
+            continue
         }
 
-        certs[i].Leaf = leaf
+        cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+        if err != nil {
+            gConfigErrors++
+            return nil, fmt.Errorf("Failed to load certificate [%s] or key [%s]: %v", certFile, keyFile, err)
+        }
+
+        leaf, err := x509.ParseCertificate(cert.Certificate[0])
+        if err != nil {
+            return nil, fmt.Errorf("Failed to parse certificate %s: %v", certFile, err)
+        }
+
+        cert.Leaf = leaf
+        certs = append(certs, cert)
 
         expiration := leaf.NotAfter.Unix()
-
-        if minExpiration == 0 {
-            minExpiration = expiration
-        } else if expiration < minExpiration {
+        if minExpiration == 0 || expiration < minExpiration {
             minExpiration = expiration
         }
+
+        dumpName := filepath.Base(certFile)
+
+        if gLogLevel >= LOG_DEBUG {
+            dumpCertificateChain(dumpName, []*x509.Certificate{leaf}, true)
+        } else if gLogLevel >= LOG_VERBOSE {
+            dumpCertificateChain(dumpName, []*x509.Certificate{leaf}, false)
+        }
+    }
+
+    if len(certs) == 0 {
+        return nil, fmt.Errorf("No usable certificate/key pairs found in %s", gCertDir)
     }
 
     gCertExpiration = minExpiration
-
-    x509Certs, _ := tlsCertsToX509(certs)
-
-    if gLogLevel >= LOG_DEBUG {
-        dumpCertificateChain("Server", x509Certs, true)
-    } else if gLogLevel >= LOG_VERBOSE {
-        dumpCertificateChain("Server", x509Certs, false)
-    }
 
     return certs, nil
 }
@@ -1561,64 +1570,47 @@ func (cfg *SmtpProxyCfg) loadBalanced(list []string) []string {
 
 func watchCertificateFiles() {
 
-    type fileState struct {
-        path string
-        mod  time.Time
-    }
-
-    files := []fileState{}
-
-    if gCertFile != "" {
-        files = append(files, fileState{path: gCertFile})
-    }
-
-    if gKeyFile != "" {
-        files = append(files, fileState{path: gKeyFile})
-    }
-
-    if gCertFile2 != "" {
-        files = append(files, fileState{path: gCertFile2})
-    }
-
-    if gKeyFile2 != "" {
-        files = append(files, fileState{path: gKeyFile2})
-    }
-
-    // Initial timestamps
-    for i := range files {
-        if info, err := os.Stat(files[i].path); err == nil {
-            files[i].mod = info.ModTime()
-        }
-    }
+    lastMod := time.Now()
 
     for {
-        changed := false
 
-        for i := range files {
+        entries, err := os.ReadDir(gCertDir)
+        if err != nil {
+            log.Printf("Failed to read certificate directory %s: %v", gCertDir, err)
+        } else {
 
-            info, err := os.Stat(files[i].path)
-            if err != nil {
-                continue
+            var newest time.Time
+
+            for _, e := range entries {
+
+                if e.IsDir() {
+                    continue
+                }
+
+                info, err := e.Info()
+                if err != nil {
+                    continue
+                }
+
+                mod := info.ModTime()
+
+                if mod.After(newest) {
+                    newest = mod
+                }
             }
 
-            mod := info.ModTime()
+            if newest.After(lastMod) {
 
-            if mod.After(files[i].mod) {
+                log.Printf("Certificate directory changed: %s", gCertDir)
 
-                log.Printf("Certificate file changed: %s", files[i].path)
+                lastMod = newest
 
-                files[i].mod = mod
-                changed = true
-            }
-        }
+                // allow tools writing cert+key to finish
+                time.Sleep(1 * time.Second)
 
-        if changed {
-
-            // allow tools writing cert+key to finish
-            time.Sleep(1 * time.Second)
-
-            if err := reloadCertificates(); err != nil {
-                log.Printf("Certificate reload failed: %v", err)
+                if err := reloadCertificates(); err != nil {
+                    log.Printf("Certificate reload failed: %v", err)
+                }
             }
         }
 

@@ -1,25 +1,17 @@
 # ---- Build stage ----
 
 FROM cgr.dev/chainguard/go:latest AS builder
-
 WORKDIR /app
-
 COPY . .
-
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.gBuildPlatform=wolfi" -o smtproxy
 
 # ---- Runtime stage ----
 
 FROM cgr.dev/chainguard/wolfi-base
-
 RUN apk add --no-cache libcap libcap-utils
-
 COPY --from=builder /app/smtproxy /usr/local/bin/smtproxy
 
-RUN setcap cap_net_bind_service=+ep /usr/local/bin/smtproxy
-
+RUN setcap cap_net_bind_service=+ep /usr/local/bin/smtproxy && mkdir -p /tls && chown nonroot /tls
 USER nonroot
-
 EXPOSE 25 465 1025 1465
-
 ENTRYPOINT ["/usr/local/bin/smtproxy"]

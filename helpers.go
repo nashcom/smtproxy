@@ -10,6 +10,7 @@ import (
     "io"
     "log"
     "net"
+    "path/filepath"
     "os"
     "strconv"
     "strings"
@@ -290,4 +291,16 @@ func tlsResumeString(resumed bool) string {
         return "resumed"
     }
     return "new"
+}
+
+
+func countFilesWithExtension(dir string, ext string) (int, error) {
+    pattern := filepath.Join(dir, "*"+ext)
+
+    files, err := filepath.Glob(pattern)
+    if err != nil {
+        return 0, err
+    }
+
+    return len(files), nil
 }
