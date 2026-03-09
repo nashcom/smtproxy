@@ -1,15 +1,16 @@
 # ---- Build stage ----
 
 FROM cgr.dev/chainguard/go:latest AS builder
-WORKDIR /app
-COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.gBuildPlatform=static" -o smtproxy
+ARG GIT_COMMIT
+WORKDIR /src
+COPY ./src .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.gBuildPlatform=static" -o /tmp/smtproxy
 
 # ---- Capability stage ----
 
 FROM cgr.dev/chainguard/wolfi-base AS cap
 RUN apk add --no-cache libcap libcap-utils
-COPY --from=builder /app/smtproxy /usr/local/bin/smtproxy
+COPY --from=builder /tmp/smtproxy /usr/local/bin/smtproxy
 RUN setcap cap_net_bind_service=+ep /usr/local/bin/smtproxy
 
 # Optional verification

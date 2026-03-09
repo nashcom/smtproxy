@@ -5,7 +5,7 @@
 
 CONTAINER_IMAGE=nashcom/smtproxy
 CONTAINER_CMD=docker
-DOCKER_FILE=dockerfile
+DOCKER_FILE=container/dockerfile
 IMAGE_DESCRIPTION=Alpine
 
 
@@ -54,13 +54,13 @@ case "$1" in
     ;;
 
   -static)
-    DOCKER_FILE=dockerfile_static
+    DOCKER_FILE=container/dockerfile_static
     CONTAINER_IMAGE=$CONTAINER_IMAGE:static
     IMAGE_DESCRIPTION="Chainguard Static"
     ;;
 
   -wolfi)
-    DOCKER_FILE=dockerfile_wolfi
+    DOCKER_FILE=container/dockerfile_wolfi
     CONTAINER_IMAGE=$CONTAINER_IMAGE:wolfi
     IMAGE_DESCRIPTION="Chainguard Wolfi"
     ;;
@@ -71,7 +71,7 @@ case "$1" in
     ;;
 esac
 
-export BUILDAH_FORMAT
+export BUILDAH_FORMAT=1
 
 header "Building smtproxy image - $IMAGE_DESCRIPTION / $CONTAINER_IMAGE"
 
