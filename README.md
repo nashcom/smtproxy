@@ -11,50 +11,20 @@ The proxy is designed to be **simple, fast, and container-friendly**, making it 
 Because the application is intended to run containerized the configuration leverages environment variables.  
 Environment variables, their short description and their default and current value are printed at startup.
 
-Copy the `env_template` int `.env` and customize the value to pass them to the container at startup.
+The output contains the variable name, description, default value and current value.
+See the [Environment variables](docs/environment_variables.md) table for details.
 
+# Pull the container images
 
-```
-
-Variable                            Description                        Default                         Current
---------------------------------------------------------------------------------------------------------------------------------------------
-SMTPROXY_SERVER_NAME                Server name                        <OS Hostname>                   mailprox.example.com
-SMTPROXY_LISTEN_ADDR                STARTTLS listen address            :25                             :25
-SMTPROXY_TLS_LISTEN_ADDR            TLS      listen address            :465                            :465
-SMTPROXY_METRICS_LISTEN_ADDR        Metrics  listen address            :9100                           :9100
-SMTPROXY_ROUTING_MODE               Routing mode                       local-first                     local-first
-SMTPROXY_LOCAL_UPSTREAMS            Local  upstreams                   :25                             [mail.example.com:25]
-SMTPROXY_REMOTE_UPSTREAMS           Remote upstreams                   []                              []
-SMTPROXY_DNS_SERVERS                DNS Servers                        []                              [1.2.3.4]
-SMTPROXY_REQUIRE_TLS                Require TLS                        true                            true
-SMTPROXY_UPSTREAM_STARTTLS          Upstream use STARTTLS              true                            true
-SMTPROXY_UPSTREAM_REQUIRE_TLS       Upstream requires TLS              true                            true
-SMTPROXY_UPSTREAM_TLS               Upstream implicit TLS              false                           false
-SMTPROXY_TLS13_ONLY                 TLS13 only                         false                           false
-SMTPROXY_UPSTREAM_TLS13_ONLY        Upstream TLS13 only                false                           false
-SMTPROXY_SKIP_CERT_VALIDATION       Skip cert validation               false                           false
-SMTPROXY_SEND_XCLIENT               XCLIENT to signal IP               false                           false
-SMTPROXY_MAX_CONNECTIONS            Maximum sessions                   1000                            1000
-SMTPROXY_TRUSTED_ROOT_FILE          Trusted root file                  <System trust store>            []
-SMTPROXY_CERT_DIR                   Certificate directory              /tls                            /tls
-SMTPROXY_MICROCA_CURVE_NAME         Optional MicroCA CurveName         []                              []
-SMTPROXY_CLIENT_TIMEOUT             Client timeout (sec)               120                             2m0s
-SMTPROXY_SHUTDOWN_SECONDS           Max shutdown time (sec)            60                              60
-SMTPROXY_CERT_UPDATE_CHECK_SECONDS  Cert Update Check (sec)            300                             300
-SMTPROXY_LOGLEVEL                   Log level                          ERROR                           ERROR
-SMTPROXY_HANDSHAKE_LOGLEVEL         Handshake Log level                NONE                            NONE
-
-Routing mode values:
-  [local-first|failover|loadbalance]
-
-Log level values:
-  3=NONE 4=ERROR 5=INFO 6=VERBOSE 7=DEBUG
-
+The container image can be pulled from GitHub registry:
 
 ```
-
+docker pull ghcr.io/nashcom/smtproxy:latest
+```
 
 # Build the container image
+
+The image can be also build on Docker. The project contains a build script including alternate build options.
 
 ```
 /build.sh
@@ -63,31 +33,45 @@ Log level values:
 This build command creates the container image using the standard Alpine build.
 For additional build options check [Build alternative images](docs/build.md).
 
-
 # Run on Docker
+
+A simple way to run the Docker container is the following invocation.
 
 ```
 docker run -d --name smtproxy -p 25:25 -p 465:465 -v ./tls:/tls smtproxy
 ```
 
-## Important parameters
+The project also contains a helper script [smtproxctl](tools/smtproxyctl.sh) to run on Docker.
+**smtproxctl** can be installed via [install_smtproxctl.sh](tools/install_smtproxctl.sh)
+
+There is also [docker-compose.yml](examples/docker/docker-compose.yml) file.
+
+
+# Run on Kubernetes (K8s)
+
+The container image is also designed for K8s. 
+To ensure the original IP address is passed to the containers the load balancer needs to be configured to pass the original IP.
+See the [Kubernetes configuration directory](examples/k8s) for details.
+
+
+## TLS Keys and Certificates
 
 The program requires at least a certificate and key which by default is expected in the `/tls`directory
 For the Docker example a certificate and key are specified via volume mounts
 
 Certificates and keys need to provided in PEM format and need to have the follwing extensions:
 
-- **.key** Unencrypted PEM RSA or ECDSA key
-- **.crt** Leaf certificate and full chain in PEM format
+- `.key` Unencrypted PEM RSA or ECDSA key
+- `.crt` Leaf certificate and full chain in PEM format
 
-The .key and .crt file must match by name
+The `.key` and `.crt` file must match by name
 
-Example:
+### Example:
 
 - server.key
 - server.crt
 
-If no certificate/key is found, a Micro CA is created and a new key and certificate is created for the server host name.
+If no certificate is found, a Micro CA is created and a new key and certificate is created for the server host name.
 By default the certificate is a RSA key and can be optionally changed to an ECDSA key.
 
 To generate an ECDSA key use `SMTPROXY_MICROCA_CURVE_NAME=P256`
@@ -97,6 +81,7 @@ To generate an ECDSA key use `SMTPROXY_MICROCA_CURVE_NAME=P256`
 
 The application supports multiple log levels and provides a very clean and helpful log format.
 See this [example log document](docs/smtproxy_log_example.md)
+The log is written to STDOUT.
 
 
 ## Log level
@@ -269,16 +254,31 @@ A separate log logic is available to log details about the handshake.
 # XCLIENT Support
 
 The proxy can optionally send **XCLIENT information** to the upstream SMTP server.
+This is useful when the upstream server supports XCLIENT (for example Postfix).
+It allows the upstream server to see the original client IP and TLS details.
 
-This allows the upstream server to see the original client IP and TLS details.
 
-Example:
+## Example:
 
 ```text
-XCLIENT ADDR=192.168.1.25 TLSVERSION=TLS1.3 TLSCIPHER=TLS_AES_256_GCM_SHA384
+XCLIENT ADDR=79.194.3.107 NAME=p4fc2036b.dip0.t-ipconnect.de TLSVERSION=TLS1.3 TLSCIPHER=TLS_AES_128_GCM_SHA256 TLSCURVE=X25519
 ```
 
-This is useful when the upstream server supports XCLIENT (for example Postfix).
+## Standard values
+
+- ADDR
+- NAME
+
+
+## Additional values
+
+The application provides additional fields, which are not part of the official standard.
+
+- TLSVERSION
+- TLSCIPHER
+- TLSCURVE
+
+SpamGeek for Domino can also leverage XCLIENT configuraitons. See [SpamGeek configuration](docs/spamgeek.md) for details.
 
 
 # Session Logging
@@ -337,3 +337,4 @@ Main features include:
 * session logging
 
 The implementation focuses on **simplicity, performance, and operational visibility**, making it suitable for both traditional and cloud-native deployments.
+
