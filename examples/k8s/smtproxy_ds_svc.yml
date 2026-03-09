@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: smtproxy
+  namespace: domino
+spec:
+  selector:
+    matchLabels:
+      app: smtproxy
+
+  template:
+    metadata:
+      labels:
+        app: smtproxy
+
+    spec:
+      containers:
+      - name: smtproxy
+        image: ghcr.io/nashcom/smtproxy:latest
+        imagePullPolicy: Always
+
+        ports:
+        - containerPort: 25
+          name: smtp
+        - containerPort: 465
+          name: smtps
+
+        env:
+        - name: SMTPROXY_SERVER_NAME
+          value: "mail.example.com"
+
+        - name: SMTPROXY_DNS_SERVERS
+          value: "1.1.1.1"
+
+        - name: SMTPROXY_LISTEN_ADDR
+          value: ":25"
+
+        - name: SMTPROXY_TLS_LISTEN_ADDR
+          value: ":465"
+
+        - name: SMTPROXY_METRICS_LISTEN_ADDR
+          value: ":9100"
+
+        - name: SMTPROXY_LOCAL_UPSTREAMS
+          value: "notes.example.com:25"
+
+        - name: SMTPROXY_REQUIRE_TLS
+          value: "true"
+
+        - name: SMTPROXY_UPSTREAM_STARTTLS
+          value: "true"
+
+        - name: SMTPROXY_LOGLEVEL 
+          value: "debug"
+
+        volumeMounts:
+        - name: tls
+          mountPath: /tls
+          readOnly: false 
+
+      volumes:
+      - name: tls
+        emptyDir: {}
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: smtproxy-lb
+  namespace: domino
+
+spec:
+  type: LoadBalancer
+  loadBalancerIP: 1.2.3.4
+  externalTrafficPolicy: Local
+
+  selector:
+    app: smtproxy
+
+  ports:
+    - name: smtp
+      port: 25
+      targetPort: 25
+
+    - name: smtps
+      port: 465
+      targetPort: 465

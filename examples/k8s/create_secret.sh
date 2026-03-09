@@ -1,0 +1,1 @@
+kubectl create secret tls smtproxy-tls -n domino --cert=tls.crt --key=tls.key

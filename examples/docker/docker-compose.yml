@@ -1,0 +1,27 @@
+services:
+  smtproxy:
+    image: ghcr.io/nashcom/smtproxy:latest
+    container_name: smtproxy
+    restart: unless-stopped
+    hostname: ${SMTPROXY_SERVER_NAME}
+
+    ports:
+      - "25:25"
+      - "465:465"
+
+    environment:
+      SMTPROXY_SERVER_NAME: ${SMTPROXY_SERVER_NAME}
+      SMTPROXY_DNS_SERVERS: ${SMTPROXY_DNS_SERVERS}
+      SMTPROXY_LISTEN_ADDR: ${SMTPROXY_LISTEN_ADDR}
+      SMTPROXY_TLS_LISTEN_ADDR: ${SMTPROXY_TLS_LISTEN_ADDR}
+      SMTPROXY_METRICS_LISTEN_ADDR: ${SMTPROXY_METRICS_LISTEN_ADDR}
+      SMTPROXY_LOCAL_UPSTREAMS: ${SMTPROXY_LOCAL_UPSTREAMS}
+      SMTPROXY_REQUIRE_TLS: ${SMTPROXY_REQUIRE_TLS}
+      SMTPROXY_UPSTREAM_STARTTLS: ${SMTPROXY_UPSTREAM_STARTTLS}
+      SMTPROXY_LOGLEVEL: ${SMTPROXY_LOGLEVEL}
+
+    volumes:
+      - smtproxy-tls:/tls
+
+    cap_add:
+      - NET_BIND_SERVICE
