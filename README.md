@@ -42,7 +42,7 @@ docker run -d --name smtproxy -p 25:25 -p 465:465 -v ./tls:/tls smtproxy
 ```
 
 The project also contains a helper script [smtproxctl](tools/smtproxyctl.sh) to run on Docker.
-**smtproxctl** can be installed via [install_smtproxctl.sh](tools/install_smtproxctl.sh)
+**smtproxctl** can be installed via [install_smtproxctl.sh](tools/install_smtproxyctl.sh)
 
 There is also [docker-compose.yml](examples/docker/docker-compose.yml) file.
 
