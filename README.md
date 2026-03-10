@@ -6,9 +6,97 @@
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/nashcom/buil-test/blob/main/LICENSE)
 
 
-This program implements a lightweight **SMTP proxy with STARTTLS and Implicit TLS support**.
+This project implements a lightweight **SMTP proxy with STARTTLS and Implicit TLS support**.
 It sits between SMTP clients and one or more upstream mail servers and adds features such as TLS enforcement, routing, and connection logging.  
 The proxy is designed to be **simple, fast, and container-friendly**, making it suitable for modern deployments such as Kubernetes (K8s) environments.
+
+
+# Main functionality and benefits
+
+## Provides up to date TLS version and cipher support (TLS 1.3)
+
+The application can be built with the latest version of Go.
+Go supports TLS 1.3 and a current set of ciphers.
+It also supports the first [Post-Quantum Cryptography](https://www.nist.gov/pqc) algorithm.
+
+
+## Implements STARTTLS and Implicit TLS for SMTP load-balancing with flexible configuration
+
+There are basically two scenarios:
+
+* For incoming SMTP connections, multiple back-end servers can be configured to deliver messages to the available servers.
+* For outgoing SMTP connections to a relay host.
+
+Both use cases require a separate instance either for incoming or outgoing SMTP connections.
+
+
+## Uses XCLIENT command to provide information about original IP address and Remote host (IN-ARPA address) resolution
+
+A normal SMTP load balancer would usually hide the original IP address and hostname and instead show the load balancer's IP address.
+**smtproxy** can signal the original IP address via the XCLIENT command in the incoming SMTP stream.
+
+Example:
+
+```text
+XCLIENT ADDR=79.194.3.107 NAME=p4fc2036b.dip0.t-ipconnect.de TLSVERSION=TLS1.3 TLSCIPHER=TLS_AES_128_GCM_SHA256 TLSCURVE=X25519
+```
+
+
+## DNS reverse lookup with separate cache and DNS server configuration
+
+DNS lookup performance is important for high-volume transmissions.
+In addition, administrators might want to configure DNS servers independently from the OS-level DNS configuration.
+
+The SMTP Proxy provides its own DNS cache and a separate DNS configuration.
+
+
+## Support for RSA and ECDSA certificates and ciphers in parallel
+
+The proxy supports multiple certificates which allow RSA and ECDSA cryptography in parallel.
+Most SMTP servers still use RSA today, especially when supporting TLS 1.2 clients and ensuring the TLS handshake behaves correctly.
+Supporting RSA and ECDSA has been improved in TLS 1.3. Therefore, providing TLS 1.3 support becomes important for modern SMTP connections.
+
+
+## Automatic certificate update
+
+Certificates and keys are provided in PEM format and are read from a specified directory on disk (default: **/tls**).
+The SMTP Proxy checks the directory for changed and new certificates and keys and updates the configuration on demand without requiring a restart.
+
+
+## TLS session resumption
+
+Especially for servers with higher load, support for resuming existing TLS sessions reduces the overhead of the TLS handshake.
+
+
+## Provides detailed logging and TLS enforcement
+
+The SMTP Proxy comes with very flexible and detailed logging, which includes TLS version, cipher, and CurveID.
+In addition, it can be configured to only allow TLS encrypted sessions.
+
+Example:
+
+```
+INFO: Session Summary | Duration 0.27s | C->U 656B | U->C 462B | Avg 0.00 MB/s | Client [127.0.0.1] (STARTTLS TLS1.3 TLS_AES_128_GCM_SHA256 new) -> Upstream [127.0.0.1:25] (STARTTLS TLS1.2 TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 new) Status: [OK]
+```
+
+The project also provides very detailed logging and debugging.
+See this [[example log document]](docs/smtproxy_log_example.md) for details.
+
+
+## Prometheus compatible /metrics endpoint
+
+Detailed statistics for SMTP sessions, DNS lookups, configuration issues, and data transferred.
+It provides a modern observability endpoint.
+
+
+# SMTP Proxy -- NOT A RELAY HOST!
+
+The project implements an SMTP Proxy only. It is not intended to replace existing relay hosts like a Postfix server.
+
+It does not contain any logic to dispatch messages to different servers.
+Instead, it is explicitly designed to sit between the SMTP mail server and a relay host to secure the connection and provide high availability.
+
+The container can sit in front of a HCL Domino server and also in front of any SMTP appliance or other relay host.
 
 
 # Environment variables
@@ -19,6 +107,7 @@ Environment variables, their short description and their default and current val
 The output contains the variable name, description, default value and current value.
 See the [Environment variables](docs/environment_variables.md) table for details.
 
+
 # Pull the container images
 
 The container image can be pulled from GitHub registry:
@@ -26,6 +115,7 @@ The container image can be pulled from GitHub registry:
 ```
 docker pull ghcr.io/nashcom/smtproxy:latest
 ```
+
 
 # Build the container image
 
@@ -37,6 +127,7 @@ The image can be also build on Docker. The project contains a build script inclu
 
 This build command creates the container image using the standard Alpine build.
 For additional build options check [Build alternative images](docs/build.md).
+
 
 # Run on Docker
 
@@ -85,7 +176,7 @@ To generate an ECDSA key use `SMTPROXY_MICROCA_CURVE_NAME=P256`
 # Logging
 
 The application supports multiple log levels and provides a very clean and helpful log format.
-See this [example log document](docs/smtproxy_log_example.md)
+See this [example log document](docs/smtproxy_log_example.md).
 The log is written to STDOUT.
 
 
