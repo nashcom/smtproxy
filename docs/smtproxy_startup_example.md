@@ -41,14 +41,14 @@ Copyright 2026 Nash!Com/Daniel Nashed. All rights reserved.
 
 Variable                            Description                        Default                         Current
 --------------------------------------------------------------------------------------------------------------------------------------------
-SMTPROXY_SERVER_NAME                Server name                        <OS Hostname>                   mail.example.com
-SMTPROXY_LISTEN_ADDR                STARTTLS listen address            :1025                           :25
-SMTPROXY_TLS_LISTEN_ADDR            TLS      listen address            :1465                           :465
+SMTPROXY_SERVER_NAME                Server name                        <OS Hostname>                   nsh-t14.localdomain
+SMTPROXY_LISTEN_ADDR                STARTTLS listen address            :25                             :25
+SMTPROXY_TLS_LISTEN_ADDR            TLS      listen address            :465                            :465
 SMTPROXY_METRICS_LISTEN_ADDR        Metrics  listen address            :9100                           :9100
 SMTPROXY_ROUTING_MODE               Routing mode                       local-first                     local-first
-SMTPROXY_LOCAL_UPSTREAMS            Local  upstreams                   :25                             [notes.example.com:25]
+SMTPROXY_LOCAL_UPSTREAMS            Local  upstreams                   :1025                           [:25]
 SMTPROXY_REMOTE_UPSTREAMS           Remote upstreams                   []                              []
-SMTPROXY_DNS_SERVERS                DNS Servers                        []                              [10.255.255.254]
+SMTPROXY_DNS_SERVERS                DNS Servers                        []                              []
 SMTPROXY_REQUIRE_TLS                Require TLS                        true                            true
 SMTPROXY_UPSTREAM_STARTTLS          Upstream use STARTTLS              true                            true
 SMTPROXY_UPSTREAM_REQUIRE_TLS       Upstream requires TLS              true                            true
@@ -56,22 +56,20 @@ SMTPROXY_UPSTREAM_TLS               Upstream implicit TLS              false    
 SMTPROXY_TLS13_ONLY                 TLS13 only                         false                           false
 SMTPROXY_UPSTREAM_TLS13_ONLY        Upstream TLS13 only                false                           false
 SMTPROXY_SKIP_CERT_VALIDATION       Skip cert validation               false                           false
-SMTPROXY_SEND_XCLIENT               XCLIENT to signal IP               false                           true
+SMTPROXY_SEND_XCLIENT               XCLIENT to signal IP               false                           false
 SMTPROXY_MAX_CONNECTIONS            Maximum sessions                   1000                            1000
 SMTPROXY_TRUSTED_ROOT_FILE          Trusted root file                  <System trust store>            []
 SMTPROXY_CERT_DIR                   Certificate directory              /tls                            /tls
-SMTPROXY_MICROCA_CURVE_NAME         Optional MicroCA CurveName         []                              P521
+SMTPROXY_MICROCA_CURVE_NAME         Optional MicroCA CurveName         []
 SMTPROXY_CLIENT_TIMEOUT             Client timeout (sec)               120                             2m0s
 SMTPROXY_SHUTDOWN_SECONDS           Max shutdown time (sec)            60                              60
 SMTPROXY_CERT_UPDATE_CHECK_SECONDS  Cert Update Check (sec)            300                             300
-SMTPROXY_LOGLEVEL                   Log level                          ERROR                           DEBUG
-SMTPROXY_HANDSHAKE_LOGLEVEL         Handshake Log level                NONE                            DEBUG
+SMTPROXY_LOGLEVEL                   NONE|ERROR|INFO|VERBOSE|DEBUG      ERROR                           VERBOSE
+SMTPROXY_HANDSHAKE_LOGLEVEL         Handshake Log level                NONE                            NONE
+
 
 Routing mode values:
   [local-first|failover|loadbalance]
-
-Log level values:
-  3=NONE 4=ERROR 5=INFO 6=VERBOSE 7=DEBUG
 
 
 Runtime

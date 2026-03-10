@@ -40,9 +40,9 @@ const (
     SERVER_CERT_FILE           = "server.crt"
     SERVER_KEY_FILE            = "server.key"
 
-    defaultListenAddr          = ":1025"
-    defaultTlsListenAddr       = ":1465"
-    defaultLocalUpstream       = ":25"
+    defaultListenAddr          = ":25"
+    defaultTlsListenAddr       = ":465"
+    defaultLocalUpstream       = ":1025"
     defaultMetricsAddr         = ":9100"
     defaultDNSServers          = ""
     defaultRemoteUpstream      = ""
@@ -696,6 +696,9 @@ func main() {
     showCfg("Description", "Variable", "Default", "Current")
     fmt.Printf("%s\n", dashLine(140))
 
+    logLevelValues    := fmt.Sprintf("%s|%s|%s|%s|%s", LOG_NONE, LOG_ERROR, LOG_INFO, LOG_VERBOSE, LOG_DEBUG)
+    routingModeValues := fmt.Sprintf("%s|%s|%s", RoutingModeLocalFirst, RoutingModeFailover, RoutingModeLoadBalance)
+
     showCfg("Server name",                env_smtproxy_ServerName,          "<OS Hostname>",                   gServerName)
     showCfg("STARTTLS listen address",    env_smtproxy_ListenAddr,          formatStr(defaultListenAddr),      cfg.ListenAddr)
     showCfg("TLS      listen address",    env_smtproxy_TlsListenAddr,       formatStr(defaultTlsListenAddr),   cfg.TLSListenAddr)
@@ -719,24 +722,12 @@ func main() {
     showCfg("Client timeout (sec)",       env_smtproxy_ClientTimeoutSec,    defaultClientTimeoutSec,           cfg.ClientTimeout)
     showCfg("Max shutdown time (sec)",    env_smtproxy_MaxShutdownSec,      defaultMaxShutdownSeconds,         gMaxShutdownSeconds)
     showCfg("Cert Update Check (sec)",    env_smtproxy_CertUpdCheckSec,     defaultCertUpdCheckSec,            gCertUpdCheckSec)
-    showCfg("Log level",                  env_smtproxy_LogLevel,            defaultLogLevel,                   gLogLevel)
+    showCfg(logLevelValues,               env_smtproxy_LogLevel,            defaultLogLevel,                   gLogLevel)
     showCfg("Handshake Log level",        env_smtproxy_HandshakeLogLevel,   defaultHandshakeLogLevel,          gLogHandshakeLevel)
-
-    logLevelValues := fmt.Sprintf("%d=%s %d=%s %d=%s %d=%s %d=%s",
-        LOG_NONE, LOG_NONE,
-        LOG_ERROR, LOG_ERROR,
-        LOG_INFO, LOG_INFO,
-        LOG_VERBOSE, LOG_VERBOSE,
-        LOG_DEBUG, LOG_DEBUG)
-
-    routingModeValues := fmt.Sprintf("[%s|%s|%s]", RoutingModeLocalFirst, RoutingModeFailover, RoutingModeLoadBalance)
 
     fmt.Printf("\n")
     fmt.Printf("Routing mode values:\n")
-    fmt.Printf("  %s\n", routingModeValues)
-    fmt.Printf("\nLog level values:\n")
-    fmt.Printf("  %s\n", logLevelValues)
-    fmt.Printf("\n")
+    fmt.Printf("  [%s]\n", routingModeValues)
 
     if cfg.UpstreamImplicitTLS && cfg.UpstreamRequireTLS {
         fmt.Printf("\nWarning: Upstream STARTTLS and implicit TLS cannot be enabled at the same time!\n\n")

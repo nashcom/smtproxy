@@ -189,7 +189,7 @@ for a in "$@"; do
       ;;
 
     run|start|stop|rm|remove|logs|log|bash|sh)
-      if [ ! "$CONFIG_FILE" .env ]; then
+      if [ ! -e "$CONFIG_FILE" ]; then
         log_error_exit "Please create the $CONFIG_FILE configuration file via 'env' command"
       fi
       COMMAND=$a
@@ -257,8 +257,8 @@ case "$COMMAND" in
       "$CONTAINER_CMD" rm "$CONTAINER_NAME"
     fi
 
-    "$CONTAINER_CMD" run -d --name "$CONTAINER_NAME" --hostname $CONTAINER_HOSTNAME $CONTAINER_PORTS --network "$CONTAINER_NETWORK" --cap-add=NET_BIND_SERVICE --env-file"$CONTAINER_ENV_FILE" $CONTAINER_VOLUMES "$CONTAINER_IMAGE"
-    sleep 2
+    "$CONTAINER_CMD" run -d --name "$CONTAINER_NAME" --hostname $CONTAINER_HOSTNAME $CONTAINER_PORTS --network "$CONTAINER_NETWORK" --cap-add=NET_BIND_SERVICE --env-file="$CONTAINER_ENV_FILE" $CONTAINER_VOLUMES "$CONTAINER_IMAGE"
+    sleep 3
     "$CONTAINER_CMD" logs "$CONTAINER_NAME"
     ;;
 

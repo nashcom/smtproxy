@@ -41,10 +41,15 @@ The following environment variables are supported and can be added to Docker/Pod
 
 ## Log level
 
-There are 5 standard log levels from **NONE** to **DEBUG**
+There are five standard log levels from **NONE** to **DEBUG**
+Th default log level is **ERROR**.
 
-- **0**=NONE
-- **1**=ERROR
-- **2**=INFO
-- **3**=VERBOSE
-- **4**=DEBUG
+
+| Level   | Description |
+|---------|-------------|
+| NONE    | Log nothing. |
+| ERROR   | Log only errors and failures. |
+| INFO    | Log important connection, protocol, and TLS state changes. |
+| VERBOSE | Log additional operational details useful for tracing normal flow. |
+| DEBUG   | Log full debug and protocol trace output, including client/upstream command and response flow. |
+

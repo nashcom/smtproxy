@@ -138,7 +138,7 @@ docker run -d --name smtproxy -p 25:25 -p 465:465 -v ./tls:/tls smtproxy
 ```
 
 The project also contains a helper script [smtproxctl](tools/smtproxyctl.sh) to run on Docker.
-**smtproxctl** can be installed via [tools/install.sh](tools/install_smtproxyctl.sh)
+**smtproxctl** can be installed via [tools/install.sh](tools/install.sh)
 
 There is also [docker-compose.yml](examples/docker/docker-compose.yml) file.
 
@@ -182,13 +182,17 @@ The log is written to STDOUT.
 
 ## Log level
 
-There are 5 standard log levels from **NONE** to **DEBUG**
+There are five standard log levels from **NONE** to **DEBUG**
+Th default log level is **ERROR**.
 
-- **0**=NONE
-- **1**=ERROR
-- **2**=INFO
-- **3**=VERBOSE
-- **4**=DEBUG
+
+| Level   | Description |
+|---------|-------------|
+| NONE    | Log nothing. |
+| ERROR   | Log only errors and failures. |
+| INFO    | Log important connection, protocol, and TLS state changes. |
+| VERBOSE | Log additional operational details useful for tracing normal flow. |
+| DEBUG   | Log full debug and protocol trace output, including client/upstream command and response flow. |
 
 
 # Basic Operations
