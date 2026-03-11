@@ -326,15 +326,12 @@ TLS verification can also be enforced using trusted root certificates.
 
 Multiple upstream servers can be configured.
 
-The proxy supports three routing modes:
-
-## Local-First
-
-Local servers are tried first, followed by remote servers.
+The proxy supports :
 
 ## Failover
 
 If one server fails, the proxy automatically tries the next server.
+
 
 ## Load Balancing
 

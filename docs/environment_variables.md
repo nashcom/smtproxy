@@ -9,9 +9,8 @@ The following environment variables are supported and can be added to Docker/Pod
 | SMTPROXY_LISTEN_ADDR                 | STARTTLS listen address         | :25                     | :25                    |
 | SMTPROXY_TLS_LISTEN_ADDR             | TLS listen address              | :465                    | :465                   |
 | SMTPROXY_METRICS_LISTEN_ADDR         | Metrics listen address          | :9100                   | :9100                  |
-| SMTPROXY_ROUTING_MODE                | Routing mode                    | local-first             | local-first            |
-| SMTPROXY_LOCAL_UPSTREAMS             | Local upstreams                 | :25                     | [mail.example.com:25]  |
-| SMTPROXY_REMOTE_UPSTREAMS            | Remote upstreams                | []                      | []                     |
+| SMTPROXY_UPSTREAM                    | List of upstream servers        | :1025                   | [:1025]                |
+| SMTPROXY_ROUTING_MODE                | Routing mode                    | failover                | failover               |
 | SMTPROXY_DNS_SERVERS                 | DNS Servers                     | []                      | [1.2.3.4]              |
 | SMTPROXY_REQUIRE_TLS                 | Require TLS                     | true                    | true                   |
 | SMTPROXY_UPSTREAM_STARTTLS           | Upstream use STARTTLS           | true                    | true                   |
@@ -34,7 +33,6 @@ The following environment variables are supported and can be added to Docker/Pod
 
 ## Routing mode values:
 
-- local-first
 - failover
 - loadbalance
 

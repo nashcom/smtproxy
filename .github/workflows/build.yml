@@ -3,7 +3,14 @@ name: Build Container
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'container/**'
+      - 'src/**'
   pull_request:
+    branches: [ main ]
+    paths:
+      - 'container/**'
+      - 'src/**'
   workflow_dispatch:
 
 jobs:

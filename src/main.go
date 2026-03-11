@@ -26,9 +26,9 @@ import (
 )
 
 const (
-    VersionMajor = 0
-    VersionMinor = 9
-    VersionPatch = 8
+    VersionMajor = 1
+    VersionMinor = 0
+    VersionPatch = 0
 
     VersionBuild int64 = VersionMajor*10000 + VersionMinor*100 + VersionPatch
 
@@ -40,12 +40,16 @@ const (
     SERVER_CERT_FILE           = "server.crt"
     SERVER_KEY_FILE            = "server.key"
 
+    ROUTING_MODE_FAILOVER      = "failover"
+    ROUTING_MODE_LOADBALANCE   = "loadbalance"
+    ROUTING_MODE_UNKNOWN       = "unknown"
+
     defaultListenAddr          = ":25"
     defaultTlsListenAddr       = ":465"
-    defaultLocalUpstream       = ":1025"
+    defaultUpstream            = ":1025"
     defaultMetricsAddr         = ":9100"
+    defaultRoutingMode         = ROUTING_MODE_FAILOVER
     defaultDNSServers          = ""
-    defaultRemoteUpstream      = ""
     defaultRequireTLS          = true
     defaultClientTLS13Only     = false
     defaultUpstreamTLS13Only   = false
@@ -67,8 +71,7 @@ const (
     env_smtproxy_ListenAddr         = "SMTPROXY_LISTEN_ADDR"
     env_smtproxy_TlsListenAddr      = "SMTPROXY_TLS_LISTEN_ADDR"
     env_smtproxy_RoutingMode        = "SMTPROXY_ROUTING_MODE"
-    env_smtproxy_LocalUpstreams     = "SMTPROXY_LOCAL_UPSTREAMS"
-    env_smtproxy_RemoteUpstreams    = "SMTPROXY_REMOTE_UPSTREAMS"
+    env_smtproxy_Upstream           = "SMTPROXY_UPSTREAM"
     env_smtproxy_DNSServers         = "SMTPROXY_DNS_SERVERS"
     env_smtproxy_RequireTLS         = "SMTPROXY_REQUIRE_TLS"
     env_smtproxy_TLS13Only          = "SMTPROXY_TLS13_ONLY"
@@ -96,47 +99,6 @@ type LogLevel int
 type TLSMode int
 type RoutingMode int
 
-func (m RoutingMode) String() string {
-
-    switch m {
-
-    case RoutingModeLocalFirst:
-        return "local-first"
-
-    case RoutingModeFailover:
-        return "failover"
-
-    case RoutingModeLoadBalance:
-        return "loadbalance"
-
-    default:
-        return "unknown"
-    }
-}
-
-func (l LogLevel) String() string {
-
-    switch l {
-
-    case LOG_NONE:
-        return "NONE"
-
-    case LOG_ERROR:
-        return "ERROR"
-
-    case LOG_INFO:
-        return "INFO"
-
-    case LOG_VERBOSE:
-        return "VERBOSE"
-
-    case LOG_DEBUG:
-        return "DEBUG"
-
-    default:
-        return "UNKNOWN"
-    }
-}
 
 // Global counters
 
@@ -186,15 +148,18 @@ const (
     TLSModeNone TLSMode = iota
     TLSModeImplicit
     TLSModeStartTLS
+)
 
+const (
     LOG_NONE LogLevel = iota
     LOG_ERROR
     LOG_INFO
     LOG_VERBOSE
     LOG_DEBUG
+)
 
-    RoutingModeLocalFirst RoutingMode = iota
-    RoutingModeFailover
+const (
+    RoutingModeFailover RoutingMode = iota
     RoutingModeLoadBalance
 )
 
@@ -204,8 +169,7 @@ type SmtpProxyCfg struct {
     TrustStoreFile string
     RoutingMode    RoutingMode
 
-    LocalUpstreams        []string
-    RemoteUpstreams       []string
+    Upstreams             []string
     ServerTLSConfig       *tls.Config
     RequireTLS            bool
     ClientTLS13Only       bool
@@ -245,6 +209,46 @@ type RdnsResolver struct {
     dnsQueryTime atomic.Int64
 }
 
+func (m RoutingMode) String() string {
+
+    switch m {
+
+    case RoutingModeFailover:
+        return ROUTING_MODE_FAILOVER
+
+    case RoutingModeLoadBalance:
+        return ROUTING_MODE_LOADBALANCE
+
+    default:
+        return "unknown"
+    }
+}
+
+func (l LogLevel) String() string {
+
+    switch l {
+
+    case LOG_NONE:
+        return "NONE"
+
+    case LOG_ERROR:
+        return "ERROR"
+
+    case LOG_INFO:
+        return "INFO"
+
+    case LOG_VERBOSE:
+        return "VERBOSE"
+
+    case LOG_DEBUG:
+        return "DEBUG"
+
+    default:
+        return "UNKNOWN"
+    }
+}
+
+
 func ParseLogLevel(s string) (LogLevel, error) {
 
     switch strings.ToLower(strings.TrimSpace(s)) {
@@ -272,17 +276,14 @@ func ParseRoutingMode(s string) (RoutingMode, error) {
 
     switch strings.ToLower(strings.TrimSpace(s)) {
 
-    case "", "local-first", "localfirst":
-        return RoutingModeLocalFirst, nil
-
-    case "failover":
+    case ROUTING_MODE_FAILOVER:
         return RoutingModeFailover, nil
 
-    case "loadbalance", "load-balance":
+    case ROUTING_MODE_LOADBALANCE, "load-balance":
         return RoutingModeLoadBalance, nil
     }
 
-    return RoutingModeLocalFirst, fmt.Errorf("Invalid routing mode: %s", s)
+    return RoutingModeFailover, fmt.Errorf("Invalid routing mode: %s", s)
 }
 
 type SmtpSession struct {
@@ -500,10 +501,8 @@ func main() {
 
     go handleSignals()
 
-    localUpstreams      := strings.Split(getEnv(env_smtproxy_LocalUpstreams,  defaultLocalUpstream), ",")
-    remoteUpstreams     := strings.Split(getEnv(env_smtproxy_RemoteUpstreams, defaultRemoteUpstream), ",")
-    trustStoreFile      := strings.ToLower(getEnv(env_smtproxy_TrustedRootFile, ""))
-
+    Upstreams           := strings.Split(getEnv(env_smtproxy_Upstream,    defaultUpstream), ",")
+    trustStoreFile      := getEnv(env_smtproxy_TrustedRootFile,           "")
     listenAddr          := getEnv(env_smtproxy_ListenAddr,                defaultListenAddr)
     tlsListenAddr       := getEnv(env_smtproxy_TlsListenAddr,             defaultTlsListenAddr)
     requireTLS          := getEnvBool(env_smtproxy_RequireTLS,            defaultRequireTLS)
@@ -536,11 +535,11 @@ func main() {
         gServerName = "localhost"
     }
 
-    routingMode, ErrRoutingMode := ParseRoutingMode(getEnv(env_smtproxy_RoutingMode, ""))
+    routingMode, ErrRoutingMode := ParseRoutingMode(getEnv(env_smtproxy_RoutingMode, defaultRoutingMode))
 
     if ErrRoutingMode != nil {
-        log.Fatalf("Invalid routing mode in configuration (%s) Valid options [%s|%s|%s] : %v",
-            env_smtproxy_RoutingMode, RoutingModeLocalFirst, RoutingModeFailover, RoutingModeLoadBalance, ErrRoutingMode)
+        log.Fatalf("Invalid routing mode in configuration (%s) Valid options [%s|%s] : %v",
+            env_smtproxy_RoutingMode, ROUTING_MODE_FAILOVER, ROUTING_MODE_LOADBALANCE, ErrRoutingMode)
     }
 
     CreateMicroCAandCert()
@@ -648,8 +647,7 @@ func main() {
         ListenAddr:            listenAddr,
         TLSListenAddr:         tlsListenAddr,
         RoutingMode:           routingMode,
-        LocalUpstreams:        cleanList(localUpstreams),
-        RemoteUpstreams:       cleanList(remoteUpstreams),
+        Upstreams:             cleanList(Upstreams),
         TrustStoreFile:        trustStoreFile,
         ServerTLSConfig:       serverTLS,
         RequireTLS:            requireTLS,
@@ -697,15 +695,14 @@ func main() {
     fmt.Printf("%s\n", dashLine(140))
 
     logLevelValues    := fmt.Sprintf("%s|%s|%s|%s|%s", LOG_NONE, LOG_ERROR, LOG_INFO, LOG_VERBOSE, LOG_DEBUG)
-    routingModeValues := fmt.Sprintf("%s|%s|%s", RoutingModeLocalFirst, RoutingModeFailover, RoutingModeLoadBalance)
+    routingModeValues := fmt.Sprintf("%s|%s", RoutingModeFailover, RoutingModeLoadBalance)
 
     showCfg("Server name",                env_smtproxy_ServerName,          "<OS Hostname>",                   gServerName)
     showCfg("STARTTLS listen address",    env_smtproxy_ListenAddr,          formatStr(defaultListenAddr),      cfg.ListenAddr)
     showCfg("TLS      listen address",    env_smtproxy_TlsListenAddr,       formatStr(defaultTlsListenAddr),   cfg.TLSListenAddr)
     showCfg("Metrics  listen address",    env_smtproxy_MetricsListenAddr,   formatStr(defaultMetricsAddr),     gMetricListnerAddr)
-    showCfg("Routing mode",               env_smtproxy_RoutingMode,         RoutingModeLocalFirst,             cfg.RoutingMode)
-    showCfg("Local  upstreams",           env_smtproxy_LocalUpstreams,      formatStr(defaultLocalUpstream),   cfg.LocalUpstreams)
-    showCfg("Remote upstreams",           env_smtproxy_RemoteUpstreams,     formatStr(defaultRemoteUpstream),  cfg.RemoteUpstreams)
+    showCfg("List of upstream servers",   env_smtproxy_Upstream,            formatStr(defaultUpstream),        cfg.Upstreams)
+    showCfg(routingModeValues,            env_smtproxy_RoutingMode,         defaultRoutingMode,                cfg.RoutingMode)
     showCfg("DNS Servers",                env_smtproxy_DNSServers,          formatStr(defaultDNSServers),      gDNSServers)
     showCfg("Require TLS",                env_smtproxy_RequireTLS,          defaultRequireTLS,                 cfg.RequireTLS)
     showCfg("Upstream use STARTTLS",      env_smtproxy_UpstreamSTARTTLS,    defaultUpstreamSTARTTLS,           cfg.UpstreamStartTLS)
@@ -724,10 +721,6 @@ func main() {
     showCfg("Cert Update Check (sec)",    env_smtproxy_CertUpdCheckSec,     defaultCertUpdCheckSec,            gCertUpdCheckSec)
     showCfg(logLevelValues,               env_smtproxy_LogLevel,            defaultLogLevel,                   gLogLevel)
     showCfg("Handshake Log level",        env_smtproxy_HandshakeLogLevel,   defaultHandshakeLogLevel,          gLogHandshakeLevel)
-
-    fmt.Printf("\n")
-    fmt.Printf("Routing mode values:\n")
-    fmt.Printf("  [%s]\n", routingModeValues)
 
     if cfg.UpstreamImplicitTLS && cfg.UpstreamRequireTLS {
         fmt.Printf("\nWarning: Upstream STARTTLS and implicit TLS cannot be enabled at the same time!\n\n")
@@ -1527,19 +1520,14 @@ func (s *SmtpSession) logSessionSummary() {
 func (cfg *SmtpProxyCfg) selectUpstreams() []string {
     switch cfg.RoutingMode {
 
-    case RoutingModeLocalFirst:
-        return append(cfg.LocalUpstreams, cfg.RemoteUpstreams...)
+    case RoutingModeLoadBalance:
+        return cfg.loadBalanced(cfg.Upstreams)
 
     case RoutingModeFailover:
-        locals := cfg.loadBalanced(cfg.LocalUpstreams)
-        return append(locals, cfg.RemoteUpstreams...)
-
-    case RoutingModeLoadBalance:
-        all := append(cfg.LocalUpstreams, cfg.RemoteUpstreams...)
-        return cfg.loadBalanced(all)
+        fallthrough
 
     default:
-        return cfg.LocalUpstreams
+        return cfg.Upstreams
     }
 }
 
@@ -1549,11 +1537,10 @@ func (cfg *SmtpProxyCfg) loadBalanced(list []string) []string {
     }
 
     start := atomic.AddInt64(&cfg.counter, 1)
-    result := make([]string, 0, len(list))
+    result := make([]string, len(list))
 
     for i := 0; i < len(list); i++ {
-        index := int(start+int64(i)) % len(list)
-        result = append(result, list[index])
+        result[i] = list[(int(start)+i)%len(list)]
     }
 
     return result

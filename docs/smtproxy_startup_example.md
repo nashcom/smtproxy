@@ -33,7 +33,7 @@ NotBefore      :  2026-03-09T14:56:17Z
 NotAfter       :  2027-03-09T14:56:17Z
 
 
-SMTP Proxy V0.9.8
+SMTP Proxy V1.0.0
 -------------------------
 
 Copyright 2026 Nash!Com/Daniel Nashed. All rights reserved.
@@ -45,9 +45,8 @@ SMTPROXY_SERVER_NAME                Server name                        <OS Hostn
 SMTPROXY_LISTEN_ADDR                STARTTLS listen address            :25                             :25
 SMTPROXY_TLS_LISTEN_ADDR            TLS      listen address            :465                            :465
 SMTPROXY_METRICS_LISTEN_ADDR        Metrics  listen address            :9100                           :9100
-SMTPROXY_ROUTING_MODE               Routing mode                       local-first                     local-first
-SMTPROXY_LOCAL_UPSTREAMS            Local  upstreams                   :1025                           [:25]
-SMTPROXY_REMOTE_UPSTREAMS           Remote upstreams                   []                              []
+SMTPROXY_UPSTREAM                   List of upstream servers           :1025                           [:1025]
+SMTPROXY_ROUTING_MODE               failover|loadbalance               failover                        failover
 SMTPROXY_DNS_SERVERS                DNS Servers                        []                              []
 SMTPROXY_REQUIRE_TLS                Require TLS                        true                            true
 SMTPROXY_UPSTREAM_STARTTLS          Upstream use STARTTLS              true                            true
@@ -66,10 +65,6 @@ SMTPROXY_SHUTDOWN_SECONDS           Max shutdown time (sec)            60       
 SMTPROXY_CERT_UPDATE_CHECK_SECONDS  Cert Update Check (sec)            300                             300
 SMTPROXY_LOGLEVEL                   NONE|ERROR|INFO|VERBOSE|DEBUG      ERROR                           VERBOSE
 SMTPROXY_HANDSHAKE_LOGLEVEL         Handshake Log level                NONE                            NONE
-
-
-Routing mode values:
-  [local-first|failover|loadbalance]
 
 
 Runtime
