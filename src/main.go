@@ -1002,6 +1002,10 @@ func (s *SmtpSession) readClientLine() (string, error) {
 
     line, err := s.clientReader.ReadString('\n')
 
+    if err == io.EOF {
+        err = nil
+    }
+
     if gLogLevel >= LOG_DEBUG {
         s.logf(LOG_DEBUG, "C>  %q", line)
     }
@@ -1013,6 +1017,10 @@ func (s *SmtpSession) readUpstreamLine() (string, error) {
     s.upstream.SetReadDeadline(time.Now().Add(60 * time.Second))
 
     line, err := s.upstreamReader.ReadString('\n')
+
+    if err == io.EOF {
+        err = nil
+    }
 
     if gLogLevel >= LOG_DEBUG {
         s.logf(LOG_DEBUG, "U>  %q", line)
@@ -1098,6 +1106,7 @@ func (s *SmtpSession) connectUpstream() error {
             s.upstreamReader = bufio.NewReader(tlsConn)
 
             _, err = s.readUpstreamLine()
+
             if err != nil {
                 s.logf(LOG_ERROR, "Cannot read from upstream connection [%s]: %v", target, err)
                 tlsConn.Close()
@@ -1245,6 +1254,11 @@ func (s *SmtpSession) handleEHLO(line string) error {
 
     for {
         resp, err := s.readUpstreamLine()
+
+        if err == io.EOF {
+            err = nil
+        }
+
         if err != nil {
             return err
         }
@@ -1381,6 +1395,7 @@ func (s *SmtpSession) sendXCLIENT() {
     }
 
     resp, err := s.readUpstreamLine()
+
     if err != nil || !strings.HasPrefix(resp, "2") {
         s.logf(LOG_ERROR, "Upstream rejected XCLIENT: %s", resp)
     }
@@ -1554,7 +1569,9 @@ func (s *SmtpSession) run() {
         // Read and forward response(including multi-line responses
 
         for {
+
             resp, err := s.readUpstreamLine()
+
             if err != nil {
                 s.logf(LOG_ERROR, "Cannot read Upstream response: %v", err)
                 return
