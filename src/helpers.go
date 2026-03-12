@@ -313,7 +313,7 @@ func extractIP(addr net.Addr) net.IP {
     return nil
 }
 
-func isTrusted(ip net.IP, nets []*net.IPNet) bool {
+func ipInNets(ip net.IP, nets []*net.IPNet) bool {
 
     for _, n := range nets {
         if n.Contains(ip) {

@@ -28,7 +28,7 @@ import (
 const (
     VersionMajor = 1
     VersionMinor = 0
-    VersionPatch = 2
+    VersionPatch = 3
 
     VersionBuild int64 = VersionMajor*10000 + VersionMinor*100 + VersionPatch
 
@@ -49,6 +49,8 @@ const (
     defaultUpstream            = ":1025"
     defaultMetricsAddr         = ":9100"
     defaultTrustedProxies      = "127.0.0.1/32"
+    defaultExcludeFromLogNets  = ""
+    defaultDebugLogNets        = ""
     defaultRoutingMode         = ROUTING_MODE_FAILOVER
     defaultDNSServers          = ""
     defaultRequireTLS          = true
@@ -73,35 +75,37 @@ const (
     defaultHandshakeLogLevel   = LOG_NONE
     defaultNoPTRFound          = "" // Empty string to indicate PTR is found
 
-    env_smtproxy_ListenAddr         = "SMTPROXY_LISTEN_ADDR"
-    env_smtproxy_TlsListenAddr      = "SMTPROXY_TLS_LISTEN_ADDR"
-    env_smtproxy_RoutingMode        = "SMTPROXY_ROUTING_MODE"
-    env_smtproxy_Upstream           = "SMTPROXY_UPSTREAM"
-    env_smtproxy_TrustedProxies     = "SMTPROXY_TRUSTED_PROXIES"
-    env_smtproxy_ProxyProto         = "SMTPROXY_PROXY_PROTO"
-    env_smtproxy_DNSServers         = "SMTPROXY_DNS_SERVERS"
-    env_smtproxy_RequireTLS         = "SMTPROXY_REQUIRE_TLS"
-    env_smtproxy_TLS13Only          = "SMTPROXY_TLS13_ONLY"
-    env_smtproxy_UpstreamTLS13Only  = "SMTPROXY_UPSTREAM_TLS13_ONLY"
-    env_smtproxy_UpstreamSTARTTLS   = "SMTPROXY_UPSTREAM_STARTTLS"
-    env_smtproxy_UpstreamTLS        = "SMTPROXY_UPSTREAM_TLS"
-    env_smtproxy_UpstreamRequireTLS = "SMTPROXY_UPSTREAM_REQUIRE_TLS"
-    env_smtproxy_ServerName         = "SMTPROXY_SERVER_NAME"
-    env_smtproxy_TrustedRootFile    = "SMTPROXY_TRUSTED_ROOT_FILE"
-    env_smtproxy_SkipCertValidation = "SMTPROXY_SKIP_CERT_VALIDATION"
-    env_smtproxy_SendXCLIENT        = "SMTPROXY_SEND_XCLIENT"
-    env_smtproxy_AddHeadersConnect  = "SMTPROXY_ADD_HEADERS_CONNECT"
-    env_smtproxy_AddHeadersTLS      = "SMTPROXY_ADD_HEADERS_TLS"
-    env_smtproxy_LogLevel           = "SMTPROXY_LOGLEVEL"
-    env_smtproxy_HandshakeLogLevel  = "SMTPROXY_HANDSHAKE_LOGLEVEL"
-    env_smtproxy_ClientTimeoutSec   = "SMTPROXY_CLIENT_TIMEOUT"
-    env_smtproxy_MaxConnections     = "SMTPROXY_MAX_CONNECTIONS"
-    env_smtproxy_CertDir            = "SMTPROXY_CERT_DIR"
-    env_smtproxy_MicroCaCurveName   = "SMTPROXY_MICROCA_CURVE_NAME"
+    env_smtproxy_ListenAddr          = "SMTPROXY_LISTEN_ADDR"
+    env_smtproxy_TlsListenAddr       = "SMTPROXY_TLS_LISTEN_ADDR"
+    env_smtproxy_RoutingMode         = "SMTPROXY_ROUTING_MODE"
+    env_smtproxy_Upstream            = "SMTPROXY_UPSTREAM"
+    env_smtproxy_TrustedProxies      = "SMTPROXY_TRUSTED_PROXIES"
+    env_smtproxy_DebugLogNets        = "SMTPROXY_DEBUG_LOG_NETWORKS"
+    env_smtproxy_ExcludeFromLogNets  = "SMTPROXY_EXCLUDE_FROM_LOG_NETWORKS"
+    env_smtproxy_ProxyProto          = "SMTPROXY_PROXY_PROTO"
+    env_smtproxy_DNSServers          = "SMTPROXY_DNS_SERVERS"
+    env_smtproxy_RequireTLS          = "SMTPROXY_REQUIRE_TLS"
+    env_smtproxy_TLS13Only           = "SMTPROXY_TLS13_ONLY"
+    env_smtproxy_UpstreamTLS13Only   = "SMTPROXY_UPSTREAM_TLS13_ONLY"
+    env_smtproxy_UpstreamSTARTTLS    = "SMTPROXY_UPSTREAM_STARTTLS"
+    env_smtproxy_UpstreamTLS         = "SMTPROXY_UPSTREAM_TLS"
+    env_smtproxy_UpstreamRequireTLS  = "SMTPROXY_UPSTREAM_REQUIRE_TLS"
+    env_smtproxy_ServerName          = "SMTPROXY_SERVER_NAME"
+    env_smtproxy_TrustedRootFile     = "SMTPROXY_TRUSTED_ROOT_FILE"
+    env_smtproxy_SkipCertValidation  = "SMTPROXY_SKIP_CERT_VALIDATION"
+    env_smtproxy_SendXCLIENT         = "SMTPROXY_SEND_XCLIENT"
+    env_smtproxy_AddHeadersConnect   = "SMTPROXY_ADD_HEADERS_CONNECT"
+    env_smtproxy_AddHeadersTLS       = "SMTPROXY_ADD_HEADERS_TLS"
+    env_smtproxy_LogLevel            = "SMTPROXY_LOGLEVEL"
+    env_smtproxy_HandshakeLogLevel   = "SMTPROXY_HANDSHAKE_LOGLEVEL"
+    env_smtproxy_ClientTimeoutSec    = "SMTPROXY_CLIENT_TIMEOUT"
+    env_smtproxy_MaxConnections      = "SMTPROXY_MAX_CONNECTIONS"
+    env_smtproxy_CertDir             = "SMTPROXY_CERT_DIR"
+    env_smtproxy_MicroCaCurveName    = "SMTPROXY_MICROCA_CURVE_NAME"
 
-    env_smtproxy_MaxShutdownSec     = "SMTPROXY_SHUTDOWN_SECONDS"
-    env_smtproxy_CertUpdCheckSec    = "SMTPROXY_CERT_UPDATE_CHECK_SECONDS"
-    env_smtproxy_MetricsListenAddr  = "SMTPROXY_METRICS_LISTEN_ADDR"
+    env_smtproxy_MaxShutdownSec      = "SMTPROXY_SHUTDOWN_SECONDS"
+    env_smtproxy_CertUpdCheckSec     = "SMTPROXY_CERT_UPDATE_CHECK_SECONDS"
+    env_smtproxy_MetricsListenAddr   = "SMTPROXY_METRICS_LISTEN_ADDR"
 )
 
 type LogLevel int
@@ -180,8 +184,12 @@ type SmtpProxyCfg struct {
     RoutingMode           RoutingMode
     ProxyProtoEnabled     bool
     TrustedProxies        []string
+    ExcludeFromLogNets    []string
+    DebugLogNets          []string
     Upstreams             []string
     ServerTLSConfig       *tls.Config
+    IPNetExcludeFromLog   []*net.IPNet
+    IPNetDebugLog         []*net.IPNet
     RequireTLS            bool
     ClientTLS13Only       bool
     UpstreamTLS13Only     bool
@@ -319,14 +327,15 @@ type SmtpSession struct {
     upstreamTLSResumed bool
     isError            bool
 
-    clientTLSMode   TLSMode
-    upstreamTLSMode TLSMode
+    clientTLSMode      TLSMode
+    upstreamTLSMode    TLSMode
+    clientNetIP        net.IP
 
-    clientTLSVersion string
-    clientCipher     string
-    clientCurveID    string
-    clientIP         string
-    clientHostName   string
+    clientTLSVersion   string
+    clientCipher       string
+    clientCurveID      string
+    clientIP           string
+    clientHostName     string
 
     upstreamIP         string
     upstreamTarget     string
@@ -516,9 +525,12 @@ func main() {
 
     go handleSignals()
 
-    cfgUpstreams           := strings.Split(getEnv(env_smtproxy_Upstream,        defaultUpstream), ",")
-    cfgTrustedProxies      := strings.Split(getEnv(env_smtproxy_TrustedProxies,  defaultTrustedProxies), ",")
-    cfgTrustStoreFile      := getEnv     (env_smtproxy_TrustedRootFile,          "")
+    cfgUpstreams           := strings.Split(getEnv(env_smtproxy_Upstream,           defaultUpstream), ",")
+    cfgTrustedProxies      := strings.Split(getEnv(env_smtproxy_TrustedProxies,     defaultTrustedProxies), ",")
+    cfgExcludeFromLogNets  := strings.Split(getEnv(env_smtproxy_ExcludeFromLogNets, defaultExcludeFromLogNets), ",")
+    cfgDebugLogNets        := strings.Split(getEnv(env_smtproxy_DebugLogNets,       defaultDebugLogNets), ",")
+    cfgTrustStoreFile      := getEnv     (env_smtproxy_TrustedRootFile,             "")
+
     cfgListenAddr          := getEnv     (env_smtproxy_ListenAddr,               defaultListenAddr)
     cfgTLSListenAddr       := getEnv     (env_smtproxy_TlsListenAddr,            defaultTlsListenAddr)
     cfgProxyProtoEnabled   := getEnvBool (env_smtproxy_ProxyProto,               defaultProxyProtoEnabled)
@@ -592,7 +604,7 @@ func main() {
         upstreamMinTLSVersion = tls.VersionTLS13
     }
 
-    serverTLS := &tls.Config{
+    cfgServerTLS := &tls.Config{
         MinVersion:               clientMinTLSVersion,
         PreferServerCipherSuites: true,
 
@@ -662,15 +674,22 @@ func main() {
         },
     }
 
+    cfgLogExcludeNets, errLogExcludeNets := parseCIDRs(cleanList(cfgExcludeFromLogNets))
+    cfgLogDebugNets,   errDebugLogNets   := parseCIDRs(cleanList(cfgDebugLogNets))
+
     cfg := &SmtpProxyCfg{
         ListenAddr:            cfgListenAddr,
         TLSListenAddr:         cfgTLSListenAddr,
         RoutingMode:           cfgRoutingMode,
         Upstreams:             cleanList(cfgUpstreams),
         TrustedProxies:        cleanList(cfgTrustedProxies),
+        ExcludeFromLogNets:    cleanList(cfgExcludeFromLogNets),
+        DebugLogNets:          cleanList(cfgDebugLogNets),
+        IPNetExcludeFromLog:   cfgLogExcludeNets,
+        IPNetDebugLog:         cfgLogDebugNets,
         ProxyProtoEnabled:     cfgProxyProtoEnabled,
         TrustStoreFile:        cfgTrustStoreFile,
-        ServerTLSConfig:       serverTLS,
+        ServerTLSConfig:       cfgServerTLS,
         RequireTLS:            cfgRequireTLS,
         ClientTLS13Only:       cfgClientTLS13Only,
         UpstreamStartTLS:      cfgUpstreamStartTLS,
@@ -722,17 +741,19 @@ func main() {
     logLevelValues    := fmt.Sprintf("%s|%s|%s|%s|%s", LOG_NONE, LOG_ERROR, LOG_INFO, LOG_VERBOSE, LOG_DEBUG)
     routingModeValues := fmt.Sprintf("%s|%s", RoutingModeFailover, RoutingModeLoadBalance)
 
-    showCfg("Server name",                env_smtproxy_ServerName,          "<OS Hostname>",                   gServerName)
-    showCfg("STARTTLS listen address",    env_smtproxy_ListenAddr,          formatStr(defaultListenAddr),      cfg.ListenAddr)
-    showCfg("TLS      listen address",    env_smtproxy_TlsListenAddr,       formatStr(defaultTlsListenAddr),   cfg.TLSListenAddr)
-    showCfg("Metrics  listen address",    env_smtproxy_MetricsListenAddr,   formatStr(defaultMetricsAddr),     gMetricListnerAddr)
-    showCfg("List of upstream servers",   env_smtproxy_Upstream,            formatStr(defaultUpstream),        cfg.Upstreams)
-    showCfg(routingModeValues,            env_smtproxy_RoutingMode,         defaultRoutingMode,                cfg.RoutingMode)
-    showCfg("DNS Servers",                env_smtproxy_DNSServers,          formatStr(defaultDNSServers),      gDNSServers)
+    showCfg("Server name",                env_smtproxy_ServerName,          "<OS Hostname>",                      gServerName)
+    showCfg("STARTTLS listen address",    env_smtproxy_ListenAddr,          formatStr(defaultListenAddr),         cfg.ListenAddr)
+    showCfg("TLS      listen address",    env_smtproxy_TlsListenAddr,       formatStr(defaultTlsListenAddr),      cfg.TLSListenAddr)
+    showCfg("Metrics  listen address",    env_smtproxy_MetricsListenAddr,   formatStr(defaultMetricsAddr),        gMetricListnerAddr)
+    showCfg("List of upstream servers",   env_smtproxy_Upstream,            formatStr(defaultUpstream),           cfg.Upstreams)
+    showCfg(routingModeValues,            env_smtproxy_RoutingMode,         defaultRoutingMode,                   cfg.RoutingMode)
+    showCfg("DNS Servers",                env_smtproxy_DNSServers,          formatStr(defaultDNSServers),         gDNSServers)
+    showCfg("Exclude from Log Networks",  env_smtproxy_ExcludeFromLogNets,  formatStr(defaultExcludeFromLogNets), cfg.ExcludeFromLogNets)
+    showCfg("Debug Log Networks",         env_smtproxy_DebugLogNets,        formatStr(defaultDebugLogNets),       cfg.DebugLogNets)
 
     if gProxyProtocolSupported {
-        showCfg("List of trusted proxies",    env_smtproxy_TrustedProxies,      formatStr(defaultTrustedProxies),  cfg.TrustedProxies)
-        showCfg("Use Proxy Protocol",         env_smtproxy_ProxyProto,          defaultProxyProtoEnabled,          cfg.ProxyProtoEnabled)
+        showCfg("List of trusted proxies",    env_smtproxy_TrustedProxies,      formatStr(defaultTrustedProxies), cfg.TrustedProxies)
+        showCfg("Use Proxy Protocol",         env_smtproxy_ProxyProto,          defaultProxyProtoEnabled,         cfg.ProxyProtoEnabled)
     }
 
     showCfg("Require TLS",                  env_smtproxy_RequireTLS,          defaultRequireTLS,                 cfg.RequireTLS)
@@ -786,6 +807,14 @@ func main() {
     _ , err = parseCIDRs(cfg.TrustedProxies)
     if err != nil {
         log.Fatal("Invalid TrustedProxies CIDRs:", err)
+    }
+
+    if errLogExcludeNets != nil {
+        log.Fatal("Invalid Log Exclude Networks CIDRs:", errLogExcludeNets)
+    }
+
+    if errDebugLogNets != nil {
+        log.Fatal("Invalid Debug Log Networks CIDRs:", errDebugLogNets)
     }
 
     fmt.Printf("\n")
@@ -984,7 +1013,14 @@ func NewSmtpSession(client net.Conn, cfg *SmtpProxyCfg, implicitTLS bool) *SmtpS
 
 func (s *SmtpSession) logf(level LogLevel, format string, args ...any) {
 
-    if level > gLogLevel {
+    if ipInNets (s.clientNetIP, s.cfg.IPNetDebugLog) {
+        // Special Debug Net Logging
+
+    } else if ipInNets (s.clientNetIP, s.cfg.IPNetExcludeFromLog) {
+        // Excluding from log
+        return
+
+    } else if level > gLogLevel {
         return
     }
 
@@ -1001,10 +1037,16 @@ func (s *SmtpSession) logNetError(err error, format string, args ...any) {
 
     level := LOG_ERROR
 
-    // This is not a real error
-    if err == io.EOF {
+    if ipInNets (s.clientNetIP, s.cfg.IPNetDebugLog) {
+        // Special Debug Net Logging
 
-        // Only log EOF in debug mode
+    } else if ipInNets (s.clientNetIP, s.cfg.IPNetExcludeFromLog) {
+        // Excluding from log
+        return
+
+    } else  if err == io.EOF {
+
+        // Only log EOF in verbose log and higher
         if gLogLevel < LOG_VERBOSE {
             return
         }
@@ -1420,6 +1462,8 @@ func (s *SmtpSession) run() {
     if err != nil {
         s.clientIP = s.client.RemoteAddr().String()
     }
+
+    s.clientNetIP = s.client.RemoteAddr().(*net.TCPAddr).IP
 
     var ok bool
 

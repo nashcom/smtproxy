@@ -33,7 +33,7 @@ func createListener(listenAddress string, proxyEnabled bool, trustedProxies []st
         Policy: func(addr net.Addr) (proxyproto.Policy, error) {
             ip := extractIP(addr)
 
-            if !isTrusted(ip, trusted) {
+            if !ipInNets(ip, trusted) {
                 log.Printf("Untrusted proxy %s based on %v\n", ip, trusted)
                 return proxyproto.REJECT, nil
             }
@@ -67,7 +67,7 @@ func createTlsListener(listenAddress string, serverTLSConfig *tls.Config, proxyE
         Policy: func(addr net.Addr) (proxyproto.Policy, error) {
             ip := extractIP(addr)
 
-            if !isTrusted(ip, trusted) {
+            if !ipInNets(ip, trusted) {
                 log.Printf("TLS Untrusted proxy %s based on %v", ip, trusted)
                 return proxyproto.REJECT, nil
             }
