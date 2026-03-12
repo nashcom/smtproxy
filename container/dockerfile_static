@@ -2,9 +2,10 @@
 
 FROM cgr.dev/chainguard/go:latest AS builder
 ARG GIT_COMMIT
+ARG GO_BUILD_TAGS
 WORKDIR /src
 COPY ./src .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.gBuildPlatform=static" -o /tmp/smtproxy
+RUN CGO_ENABLED=0 go build -tags "${GO_BUILD_TAGS}" -trimpath -ldflags="-s -w -X main.gBuildPlatform=static" -o /tmp/smtproxy
 
 # ---- Capability stage ----
 

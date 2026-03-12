@@ -45,3 +45,4 @@ jobs:
           tags: ghcr.io/${{ github.repository }}:latest
           build-args: |
             GIT_COMMIT=${{ github.sha }}
+            GO_BUILD_TAGS=proxyproto

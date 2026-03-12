@@ -7,7 +7,7 @@ CONTAINER_IMAGE=nashcom/smtproxy
 CONTAINER_CMD=docker
 DOCKER_FILE=container/dockerfile
 IMAGE_DESCRIPTION=Alpine
-
+GO_BUILD_TAGS=""
 
 print_delim()
 {
@@ -23,6 +23,30 @@ header()
   echo
 }
 
+ClearScreen()
+{
+  if [ "$DISABLE_CLEAR_SCREEN" = "yes" ]; then
+    return 0
+  fi
+
+  clear
+}
+
+log_error()
+{
+  echo
+  echo $@
+  echo
+}
+
+log_error_exit()
+{
+  echo
+  echo $@
+  echo
+
+  exit 1
+}
 
 log()
 {
@@ -30,6 +54,8 @@ log()
   echo $@
   echo
 }
+
+
 
 print_runtime()
 {
@@ -48,34 +74,61 @@ print_runtime()
 }
 
 
-case "$1" in
+usage()
+{
+  echo
+  echo "Usage: $(basename $SCRIPT_NAME)"
+  echo
+  echo
+  echo "Options"
+  echo "--------"
+  echo
+  echo "-wolfi       build Wolfi image"
+  echo "-static      build Wolfi static image (very small and stripped down without shell)"
+  echo "-proxyproto  add Proxy Protocol support"
+  echo
+}
 
-  "")
-    ;;
 
-  -static)
-    DOCKER_FILE=container/dockerfile_static
-    CONTAINER_IMAGE=$CONTAINER_IMAGE:static
-    IMAGE_DESCRIPTION="Chainguard Static"
-    ;;
+for a in "$@"; do
 
-  -wolfi)
-    DOCKER_FILE=container/dockerfile_wolfi
-    CONTAINER_IMAGE=$CONTAINER_IMAGE:wolfi
-    IMAGE_DESCRIPTION="Chainguard Wolfi"
-    ;;
+  p=$(echo "$a" | awk '{print tolower($0)}')
 
-  *)
-    echo "Invalid parameter [$1]"
-    exit 1
-    ;;
-esac
+  case "$p" in
+
+    -static)
+      DOCKER_FILE=container/dockerfile_static
+      CONTAINER_IMAGE=$CONTAINER_IMAGE:static
+      IMAGE_DESCRIPTION="Chainguard Static"
+      ;;
+
+    -wolfi)
+      DOCKER_FILE=container/dockerfile_wolfi
+      CONTAINER_IMAGE=$CONTAINER_IMAGE:wolfi
+      IMAGE_DESCRIPTION="Chainguard Wolfi"
+      ;;
+
+    -proxyproto)
+      GO_BUILD_TAGS=proxyproto
+      ;;
+
+    -h|/h|-\?|/\?|-help|--help|help|usage)
+      usage
+      exit 0
+      ;;
+
+    *)
+      log_error_exit "Invalid parameter [$a]"
+      ;;
+  esac
+done
+
 
 export BUILDAH_FORMAT=1
 
 header "Building smtproxy image - $IMAGE_DESCRIPTION / $CONTAINER_IMAGE"
 
-"$CONTAINER_CMD" build --no-cache -f "$DOCKER_FILE" -t "$CONTAINER_IMAGE" .
+"$CONTAINER_CMD" build --no-cache --build-arg GO_BUILD_TAGS="$GO_BUILD_TAGS" -f "$DOCKER_FILE" -t "$CONTAINER_IMAGE" .
 
 echo
 print_runtime

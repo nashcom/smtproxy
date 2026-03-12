@@ -304,3 +304,37 @@ func countFilesWithExtension(dir string, ext string) (int, error) {
 
     return len(files), nil
 }
+
+func extractIP(addr net.Addr) net.IP {
+    if tcp, ok := addr.(*net.TCPAddr); ok {
+        return tcp.IP
+    }
+
+    return nil
+}
+
+func isTrusted(ip net.IP, nets []*net.IPNet) bool {
+
+    for _, n := range nets {
+        if n.Contains(ip) {
+            return true
+        }
+    }
+
+    return false
+}
+
+func parseCIDRs(list []string) ([]*net.IPNet, error) {
+    var nets []*net.IPNet
+
+    for _, s := range list {
+        _, n, err := net.ParseCIDR(s)
+        if err != nil {
+            return nil, fmt.Errorf("invalid CIDR %q: %w", s, err)
+        }
+
+        nets = append(nets, n)
+    }
+
+    return nets, nil
+}

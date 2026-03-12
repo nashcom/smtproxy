@@ -28,7 +28,7 @@ import (
 const (
     VersionMajor = 1
     VersionMinor = 0
-    VersionPatch = 0
+    VersionPatch = 1
 
     VersionBuild int64 = VersionMajor*10000 + VersionMinor*100 + VersionPatch
 
@@ -48,9 +48,11 @@ const (
     defaultTlsListenAddr       = ":465"
     defaultUpstream            = ":1025"
     defaultMetricsAddr         = ":9100"
+    defaultTrustedProxies      = "127.0.0.1/32"
     defaultRoutingMode         = ROUTING_MODE_FAILOVER
     defaultDNSServers          = ""
     defaultRequireTLS          = true
+    defaultProxyProtoEnabled   = false
     defaultClientTLS13Only     = false
     defaultUpstreamTLS13Only   = false
     defaultUpstreamSTARTTLS    = true
@@ -72,6 +74,8 @@ const (
     env_smtproxy_TlsListenAddr      = "SMTPROXY_TLS_LISTEN_ADDR"
     env_smtproxy_RoutingMode        = "SMTPROXY_ROUTING_MODE"
     env_smtproxy_Upstream           = "SMTPROXY_UPSTREAM"
+    env_smtproxy_TrustedProxies     = "SMTPROXY_TRUSTED_PROXIES"
+    env_smtproxy_ProxyProto         = "SMTPROXY_PROXY_PROTO"
     env_smtproxy_DNSServers         = "SMTPROXY_DNS_SERVERS"
     env_smtproxy_RequireTLS         = "SMTPROXY_REQUIRE_TLS"
     env_smtproxy_TLS13Only          = "SMTPROXY_TLS13_ONLY"
@@ -163,12 +167,14 @@ const (
     RoutingModeLoadBalance
 )
 
-type SmtpProxyCfg struct {
-    ListenAddr     string
-    TLSListenAddr  string
-    TrustStoreFile string
-    RoutingMode    RoutingMode
 
+type SmtpProxyCfg struct {
+    ListenAddr            string
+    TLSListenAddr         string
+    TrustStoreFile        string
+    RoutingMode           RoutingMode
+    ProxyProtoEnabled     bool
+    TrustedProxies        []string
     Upstreams             []string
     ServerTLSConfig       *tls.Config
     RequireTLS            bool
@@ -501,26 +507,28 @@ func main() {
 
     go handleSignals()
 
-    Upstreams           := strings.Split(getEnv(env_smtproxy_Upstream,    defaultUpstream), ",")
-    trustStoreFile      := getEnv(env_smtproxy_TrustedRootFile,           "")
-    listenAddr          := getEnv(env_smtproxy_ListenAddr,                defaultListenAddr)
-    tlsListenAddr       := getEnv(env_smtproxy_TlsListenAddr,             defaultTlsListenAddr)
-    requireTLS          := getEnvBool(env_smtproxy_RequireTLS,            defaultRequireTLS)
-    upstreamStartTLS    := getEnvBool(env_smtproxy_UpstreamSTARTTLS,      defaultUpstreamSTARTTLS)
-    upstreamImplicitTLS := getEnvBool(env_smtproxy_UpstreamTLS,           defaultUpstreamTLS)
-    upstreamRequireTLS  := getEnvBool(env_smtproxy_UpstreamRequireTLS,    defaultUpstreamRequireTLS)
-    clientTLS13Only     := getEnvBool(env_smtproxy_TLS13Only,             defaultClientTLS13Only)
-    upstreamTLS13Only   := getEnvBool(env_smtproxy_UpstreamTLS13Only,     defaultUpstreamTLS13Only)
-    skipCertValidation  := getEnvBool(env_smtproxy_SkipCertValidation,    defaultSkipCertValidation)
-    sendXCLIENT         := getEnvBool(env_smtproxy_SendXCLIENT,           defaultSendXCLIENT)
-    clientTimeoutSec    := getEnvInt(env_smtproxy_ClientTimeoutSec,       defaultClientTimeoutSec)
-    maxConnections      := getEnvInt64(env_smtproxy_MaxConnections,       defaultMaxConnections)
+    Upstreams           := strings.Split(getEnv(env_smtproxy_Upstream,       defaultUpstream), ",")
+    trustedProxies      := strings.Split(getEnv(env_smtproxy_TrustedProxies, defaultTrustedProxies), ",")
+    trustStoreFile      := getEnv(env_smtproxy_TrustedRootFile,              "")
+    listenAddr          := getEnv(env_smtproxy_ListenAddr,                   defaultListenAddr)
+    tlsListenAddr       := getEnv(env_smtproxy_TlsListenAddr,                defaultTlsListenAddr)
+    proxyProtoEnabled   := getEnvBool(env_smtproxy_ProxyProto,               defaultProxyProtoEnabled)
+    requireTLS          := getEnvBool(env_smtproxy_RequireTLS,               defaultRequireTLS)
+    upstreamStartTLS    := getEnvBool(env_smtproxy_UpstreamSTARTTLS,         defaultUpstreamSTARTTLS)
+    upstreamImplicitTLS := getEnvBool(env_smtproxy_UpstreamTLS,              defaultUpstreamTLS)
+    upstreamRequireTLS  := getEnvBool(env_smtproxy_UpstreamRequireTLS,       defaultUpstreamRequireTLS)
+    clientTLS13Only     := getEnvBool(env_smtproxy_TLS13Only,                defaultClientTLS13Only)
+    upstreamTLS13Only   := getEnvBool(env_smtproxy_UpstreamTLS13Only,        defaultUpstreamTLS13Only)
+    skipCertValidation  := getEnvBool(env_smtproxy_SkipCertValidation,       defaultSkipCertValidation)
+    sendXCLIENT         := getEnvBool(env_smtproxy_SendXCLIENT,              defaultSendXCLIENT)
+    clientTimeoutSec    := getEnvInt(env_smtproxy_ClientTimeoutSec,          defaultClientTimeoutSec)
+    maxConnections      := getEnvInt64(env_smtproxy_MaxConnections,          defaultMaxConnections)
 
-    gMaxShutdownSeconds = getEnvInt(env_smtproxy_MaxShutdownSec,          defaultMaxShutdownSeconds)
-    gCertUpdCheckSec    = getEnvInt(env_smtproxy_CertUpdCheckSec,         defaultCertUpdCheckSec)
-    gMetricListnerAddr  = getEnv(env_smtproxy_MetricsListenAddr,          defaultMetricsAddr)
-    gLogLevel           = getEnvLogLevel(env_smtproxy_LogLevel,           defaultLogLevel)
-    gLogHandshakeLevel  = getEnvLogLevel(env_smtproxy_HandshakeLogLevel,  defaultHandshakeLogLevel)
+    gMaxShutdownSeconds = getEnvInt(env_smtproxy_MaxShutdownSec,             defaultMaxShutdownSeconds)
+    gCertUpdCheckSec    = getEnvInt(env_smtproxy_CertUpdCheckSec,            defaultCertUpdCheckSec)
+    gMetricListnerAddr  = getEnv(env_smtproxy_MetricsListenAddr,             defaultMetricsAddr)
+    gLogLevel           = getEnvLogLevel(env_smtproxy_LogLevel,              defaultLogLevel)
+    gLogHandshakeLevel  = getEnvLogLevel(env_smtproxy_HandshakeLogLevel,     defaultHandshakeLogLevel)
     gCertDir            = getEnv(env_smtproxy_CertDir,    defaultCertDir)
     gMicroCACurveName   = getEnv(env_smtproxy_MicroCaCurveName, "")
     gDNSServers         = cleanList(strings.Split(getEnv(env_smtproxy_DNSServers, defaultDNSServers), ","))
@@ -648,6 +656,8 @@ func main() {
         TLSListenAddr:         tlsListenAddr,
         RoutingMode:           routingMode,
         Upstreams:             cleanList(Upstreams),
+        TrustedProxies:        cleanList(trustedProxies),
+        ProxyProtoEnabled:     proxyProtoEnabled,
         TrustStoreFile:        trustStoreFile,
         ServerTLSConfig:       serverTLS,
         RequireTLS:            requireTLS,
@@ -690,7 +700,9 @@ func main() {
     fmt.Printf("\n")
     fmt.Printf("SMTP Proxy V%s\n", gVersionStr)
     fmt.Printf("%s\n\n", dashLine(25))
+
     fmt.Printf("%s\n\n\n", copyright)
+
     showCfg("Description", "Variable", "Default", "Current")
     fmt.Printf("%s\n", dashLine(140))
 
@@ -704,6 +716,12 @@ func main() {
     showCfg("List of upstream servers",   env_smtproxy_Upstream,            formatStr(defaultUpstream),        cfg.Upstreams)
     showCfg(routingModeValues,            env_smtproxy_RoutingMode,         defaultRoutingMode,                cfg.RoutingMode)
     showCfg("DNS Servers",                env_smtproxy_DNSServers,          formatStr(defaultDNSServers),      gDNSServers)
+
+    if gProxyProtocolSupported == true {
+        showCfg("List of trusted proxies",    env_smtproxy_TrustedProxies,      formatStr(defaultTrustedProxies),  cfg.TrustedProxies)
+        showCfg("Use Proxy Protocol",         env_smtproxy_ProxyProto,          defaultProxyProtoEnabled,          cfg.ProxyProtoEnabled)
+    }
+
     showCfg("Require TLS",                env_smtproxy_RequireTLS,          defaultRequireTLS,                 cfg.RequireTLS)
     showCfg("Upstream use STARTTLS",      env_smtproxy_UpstreamSTARTTLS,    defaultUpstreamSTARTTLS,           cfg.UpstreamStartTLS)
     showCfg("Upstream requires TLS",      env_smtproxy_UpstreamRequireTLS,  defaultUpstreamRequireTLS,         cfg.UpstreamRequireTLS)
@@ -739,11 +757,20 @@ func main() {
     if gDNSServerCount > 0 {
         showInfo("Reverse DNS", gDNSServers)
     } else {
-        showInfo("Reverse DNS", "Disabled")
+        showInfo("Reverse DNS", "disabled")
+    }
+
+    if gProxyProtocolSupported == true {
+        showInfo("Proxy Protocol", "supported")
     }
 
     if gConfigErrors > 0 {
         fmt.Printf("\nWARNING - Configuration %d error(s) -- Please validate your configuration!\n", gConfigErrors)
+    }
+
+    _ , err = parseCIDRs(cfg.TrustedProxies)
+    if err != nil {
+        log.Fatal("Invalid TrustedProxies CIDRs:", err)
     }
 
     fmt.Printf("\n")
@@ -758,12 +785,16 @@ func main() {
     // Plain SMTP listener (STARTTLS capable)
     if cfg.ListenAddr != "" {
         go func() {
-            listener, err := net.Listen("tcp", cfg.ListenAddr)
+            listener, err := createListener(cfg.ListenAddr, cfg.ProxyProtoEnabled, cfg.TrustedProxies)
             if err != nil {
                 log.Fatal(err)
             }
 
-            log.Printf("Listening with STARTTLS on [%s]", cfg.ListenAddr)
+            if cfg.ProxyProtoEnabled {
+                log.Printf("Listening with STARTTLS on [%s] (ProxyProtocol enabled)", cfg.ListenAddr)
+            } else {
+                log.Printf("Listening with STARTTLS on [%s]", cfg.ListenAddr)
+            }
 
             for {
                 conn, err := listener.Accept()
@@ -799,12 +830,17 @@ func main() {
     // Implicit TLS listener (SMTPS)
     if cfg.TLSListenAddr != "" {
         go func() {
-            listener, err := tls.Listen("tcp", cfg.TLSListenAddr, cfg.ServerTLSConfig)
+            listener, err := createTlsListener(cfg.TLSListenAddr, cfg.ServerTLSConfig, cfg.ProxyProtoEnabled, cfg.TrustedProxies)
+
             if err != nil {
                 log.Fatal(err)
             }
 
-            log.Printf("Listening with SMTP TLS on [%s]", cfg.TLSListenAddr)
+            if cfg.ProxyProtoEnabled {
+                log.Printf("Listening with SMTP TLS on [%s] (ProxyProtocol enabled)", cfg.TLSListenAddr)
+            } else {
+                log.Printf("Listening with SMTP TLS on [%s]", cfg.TLSListenAddr)
+            }
 
             for {
                 conn, err := listener.Accept()
