@@ -997,14 +997,33 @@ func (s *SmtpSession) logf(level LogLevel, format string, args ...any) {
         append([]any{s.sessionID, s.clientIP, level}, args...)...)
 }
 
+func (s *SmtpSession) logNetError(err error, format string, args ...any) {
+
+    level := LOG_ERROR
+
+    // This is not a real error
+    if err == io.EOF {
+
+        // Only log EOF in debug mode
+        if gLogLevel < LOG_VERBOSE {
+            return
+        }
+
+        level = LOG_VERBOSE
+
+    } else {
+        s.isError = true
+        s.sessionError = fmt.Sprintf(format, args...)
+    }
+
+    log.Printf("[%08d %s] %s: "+format,
+        append([]any{s.sessionID, s.clientIP, level}, args...)...)
+}
+
 func (s *SmtpSession) readClientLine() (string, error) {
     s.client.SetReadDeadline(time.Now().Add(60 * time.Second))
 
     line, err := s.clientReader.ReadString('\n')
-
-    if err == io.EOF {
-        err = nil
-    }
 
     if gLogLevel >= LOG_DEBUG {
         s.logf(LOG_DEBUG, "C>  %q", line)
@@ -1017,10 +1036,6 @@ func (s *SmtpSession) readUpstreamLine() (string, error) {
     s.upstream.SetReadDeadline(time.Now().Add(60 * time.Second))
 
     line, err := s.upstreamReader.ReadString('\n')
-
-    if err == io.EOF {
-        err = nil
-    }
 
     if gLogLevel >= LOG_DEBUG {
         s.logf(LOG_DEBUG, "U>  %q", line)
@@ -1091,7 +1106,7 @@ func (s *SmtpSession) connectUpstream() error {
             })
 
             if err != nil {
-                s.logf(LOG_ERROR, "Upstream TLS connect [%s] failed: %v", target, err)
+                s.logNetError(err, "Upstream TLS connect [%s] failed: %v", target, err)
                 continue
             }
 
@@ -1108,7 +1123,7 @@ func (s *SmtpSession) connectUpstream() error {
             _, err = s.readUpstreamLine()
 
             if err != nil {
-                s.logf(LOG_ERROR, "Cannot read from upstream connection [%s]: %v", target, err)
+                s.logNetError(err, "Cannot read from upstream connection [%s]: %v", target, err)
                 tlsConn.Close()
                 continue
             }
@@ -1123,7 +1138,7 @@ func (s *SmtpSession) connectUpstream() error {
 
         conn, err := dialer.Dial("tcp", target)
         if err != nil {
-            s.logf(LOG_ERROR, "Cannot connect to upstream [%s] : %v", target, err)
+            s.logNetError(err, "Cannot connect to upstream [%s] : %v", target, err)
             continue
         }
 
@@ -1131,7 +1146,7 @@ func (s *SmtpSession) connectUpstream() error {
 
         _, err = reader.ReadString('\n')
         if err != nil {
-            s.logf(LOG_ERROR, "Cannot read from upstream [%s] : %v", target, err)
+            s.logNetError(err, "Cannot read from upstream [%s] : %v", target, err)
             conn.Close()
             continue
         }
@@ -1143,7 +1158,7 @@ func (s *SmtpSession) connectUpstream() error {
         for {
             line, err := reader.ReadString('\n')
             if err != nil {
-                s.logf(LOG_ERROR, "Cannot read from upstream [%s] : %v", target, err)
+                s.logNetError(err, "Cannot read from upstream [%s] : %v", target, err)
                 conn.Close()
                 goto nextTarget
             }
@@ -1163,7 +1178,7 @@ func (s *SmtpSession) connectUpstream() error {
 
             resp, err := reader.ReadString('\n')
             if err != nil || !isSMTP2xx(resp) {
-                s.logf(LOG_ERROR, "Cannot unexpected status returned from upstream [%s]. Response: [%v] : %v", target, resp, err)
+                s.logNetError(err, "Cannot unexpected status returned from upstream [%s]. Response: [%v] : %v", target, resp, err)
                 conn.Close()
                 goto nextTarget
             }
@@ -1176,7 +1191,7 @@ func (s *SmtpSession) connectUpstream() error {
             })
 
             if err := tlsConn.Handshake(); err != nil {
-                s.logf(LOG_ERROR, "Handshake to upstream [%s] failed: %v", target, err)
+                s.logNetError(err, "Handshake to upstream [%s] failed: %v", target, err)
                 tlsConn.Close()
                 goto nextTarget
             }
@@ -1217,7 +1232,7 @@ func (s *SmtpSession) handleStartTLS() error {
     }
 
     if err := s.writeClientBytes(smtpResponse_StartTLSReadyBytes); err != nil {
-        s.logf(LOG_ERROR, "Cannot write STARTTLS response to client: %v", err)
+        s.logNetError(err, "Cannot write STARTTLS response to client: %v", err)
         return err
     }
 
@@ -1255,10 +1270,6 @@ func (s *SmtpSession) handleEHLO(line string) error {
     for {
         resp, err := s.readUpstreamLine()
 
-        if err == io.EOF {
-            err = nil
-        }
-
         if err != nil {
             return err
         }
@@ -1286,7 +1297,7 @@ func (s *SmtpSession) handleEHLO(line string) error {
 
     for _, l := range s.responseLines {
         if err := s.writeClientBytes([]byte(l));  err != nil {
-            s.logf(LOG_ERROR, "Cannot write response lines to client: %v", err)
+            s.logNetError(err, "Cannot write response lines to client: %v", err)
         }
     }
 
@@ -1365,7 +1376,7 @@ func (s *SmtpSession) startTunnel() {
         }
 
         if r.err != nil && !isClosedNetErr(r.err) {
-            s.logf(LOG_ERROR, "%s: %v", r.dir, r.err)
+            s.logNetError(r.err, "%s: %v", r.dir, r.err)
         }
     }
 
@@ -1390,14 +1401,14 @@ func (s *SmtpSession) sendXCLIENT() {
     s.logf(LOG_VERBOSE, "Sending XCLIENT: %s", strings.TrimSpace(cmd))
 
     if err := s.writeUpstreamStr(cmd); err != nil {
-        s.logf(LOG_ERROR, "XCLIENT failed: %v", err)
+        s.logNetError(err, "XCLIENT failed: %v", err)
         return
     }
 
     resp, err := s.readUpstreamLine()
 
     if err != nil || !strings.HasPrefix(resp, "2") {
-        s.logf(LOG_ERROR, "Upstream rejected XCLIENT: %s", resp)
+        s.logNetError(err, "Upstream rejected XCLIENT: %s", resp)
     }
 }
 
@@ -1426,7 +1437,7 @@ func (s *SmtpSession) run() {
     if err = s.connectUpstream(); err != nil {
 
         if err := s.writeClientBytes(smtpResponse_ServiceUnavailableBytes);  err != nil {
-            s.logf(LOG_ERROR, "Cannot write Service Unavailable to client: %v", err)
+            s.logNetError(err, "Cannot write Service Unavailable to client: %v", err)
         }
 
         return
@@ -1462,7 +1473,8 @@ func (s *SmtpSession) run() {
     }
 
     if err := s.writeClientBytes(smtpResponse_GreetingBytes); err != nil {
-            s.logf(LOG_ERROR, "Cannot write SMTP Greeting response to client: %v", err)
+        s.logNetError(err, "Cannot write SMTP Greeting response to client: %v", err)
+        return
     }
 
     if s.inboundTLS {
@@ -1478,7 +1490,7 @@ func (s *SmtpSession) run() {
 
         line, err := s.readClientLine()
         if err != nil {
-            s.logf(LOG_ERROR, "Cannot read line from client: %v", err)
+            s.logNetError(err, "Cannot read line from client: %v", err)
             return
         }
 
@@ -1513,7 +1525,7 @@ func (s *SmtpSession) run() {
 
             // Write received line
             if err := s.writeUpstreamStr(line); err != nil {
-                s.logf(LOG_ERROR, "Cannot write Upstream line: %v", err)
+                s.logNetError(err, "Cannot write Upstream line: %v", err)
                 return
             }
 
@@ -1526,7 +1538,7 @@ func (s *SmtpSession) run() {
             strings.HasPrefix(cmd, "HELO ") {
 
             if err := s.handleEHLO(line); err != nil {
-                s.logf(LOG_ERROR, "Cannot handle EHLO/HELO command: %v", err)
+                s.logNetError(err, "Cannot handle EHLO/HELO command: %v", err)
                 return
             }
 
@@ -1536,7 +1548,7 @@ func (s *SmtpSession) run() {
         if cmd == "STARTTLS" {
 
             if err := s.handleStartTLS(); err != nil {
-                s.logf(LOG_ERROR, "Cannot handle STARTTLS command: %v", err)
+                s.logNetError(err, "Cannot handle STARTTLS command: %v", err)
                 return
             }
 
@@ -1562,7 +1574,7 @@ func (s *SmtpSession) run() {
 
         // Write received line
         if err := s.writeUpstreamStr(line); err != nil {
-            s.logf(LOG_ERROR, "Cannot write Upstream line: %v", err)
+            s.logNetError(err, "Cannot write Upstream line: %v", err)
             return
         }
 
@@ -1573,12 +1585,13 @@ func (s *SmtpSession) run() {
             resp, err := s.readUpstreamLine()
 
             if err != nil {
-                s.logf(LOG_ERROR, "Cannot read Upstream response: %v", err)
+                s.logNetError(err, "Cannot read Upstream response: %v", err)
                 return
             }
 
             if err := s.writeClientBytes([]byte(resp)); err != nil {
-                s.logf(LOG_ERROR, "Cannot write response to client: %v", err)
+                s.logNetError(err, "Cannot write response to client: %v", err)
+                return
             }
 
             if s.dataCmdReceived || len(resp) < 4 || resp[3] != '-'{
