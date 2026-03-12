@@ -28,7 +28,7 @@ import (
 const (
     VersionMajor = 1
     VersionMinor = 0
-    VersionPatch = 1
+    VersionPatch = 2
 
     VersionBuild int64 = VersionMajor*10000 + VersionMinor*100 + VersionPatch
 
@@ -60,6 +60,9 @@ const (
     defaultUpstreamRequireTLS  = true
     defaultSkipCertValidation  = false
     defaultSendXCLIENT         = false
+    defaultAddHeadersConnect   = false
+    defaultAddHeadersTLS       = false
+
     defaultCfgCheckIntervalSec = 120
     defaultClientTimeoutSec    = 120
     defaultCertDir             = "/tls"
@@ -87,6 +90,8 @@ const (
     env_smtproxy_TrustedRootFile    = "SMTPROXY_TRUSTED_ROOT_FILE"
     env_smtproxy_SkipCertValidation = "SMTPROXY_SKIP_CERT_VALIDATION"
     env_smtproxy_SendXCLIENT        = "SMTPROXY_SEND_XCLIENT"
+    env_smtproxy_AddHeadersConnect  = "SMTPROXY_ADD_HEADERS_CONNECT"
+    env_smtproxy_AddHeadersTLS      = "SMTPROXY_ADD_HEADERS_TLS"
     env_smtproxy_LogLevel           = "SMTPROXY_LOGLEVEL"
     env_smtproxy_HandshakeLogLevel  = "SMTPROXY_HANDSHAKE_LOGLEVEL"
     env_smtproxy_ClientTimeoutSec   = "SMTPROXY_CLIENT_TIMEOUT"
@@ -185,6 +190,8 @@ type SmtpProxyCfg struct {
     UpstreamRequireTLS    bool
     SendXCLIENT           bool
     InsecureSkipVerify    bool
+    AddHeadersConnect     bool
+    AddHeadersTLS         bool
     TrustedRoots          *x509.CertPool
     UpstreamMinTLSVersion uint16
     ClientTimeout         time.Duration
@@ -305,6 +312,8 @@ type SmtpSession struct {
 
     implicitTLS        bool
     inboundTLS         bool
+    dataCmdReceived    bool
+    dataHeadersDone    bool
     tunnelMode         bool
     clientTLSResumed   bool
     upstreamTLSResumed bool
@@ -507,32 +516,34 @@ func main() {
 
     go handleSignals()
 
-    Upstreams           := strings.Split(getEnv(env_smtproxy_Upstream,       defaultUpstream), ",")
-    trustedProxies      := strings.Split(getEnv(env_smtproxy_TrustedProxies, defaultTrustedProxies), ",")
-    trustStoreFile      := getEnv(env_smtproxy_TrustedRootFile,              "")
-    listenAddr          := getEnv(env_smtproxy_ListenAddr,                   defaultListenAddr)
-    tlsListenAddr       := getEnv(env_smtproxy_TlsListenAddr,                defaultTlsListenAddr)
-    proxyProtoEnabled   := getEnvBool(env_smtproxy_ProxyProto,               defaultProxyProtoEnabled)
-    requireTLS          := getEnvBool(env_smtproxy_RequireTLS,               defaultRequireTLS)
-    upstreamStartTLS    := getEnvBool(env_smtproxy_UpstreamSTARTTLS,         defaultUpstreamSTARTTLS)
-    upstreamImplicitTLS := getEnvBool(env_smtproxy_UpstreamTLS,              defaultUpstreamTLS)
-    upstreamRequireTLS  := getEnvBool(env_smtproxy_UpstreamRequireTLS,       defaultUpstreamRequireTLS)
-    clientTLS13Only     := getEnvBool(env_smtproxy_TLS13Only,                defaultClientTLS13Only)
-    upstreamTLS13Only   := getEnvBool(env_smtproxy_UpstreamTLS13Only,        defaultUpstreamTLS13Only)
-    skipCertValidation  := getEnvBool(env_smtproxy_SkipCertValidation,       defaultSkipCertValidation)
-    sendXCLIENT         := getEnvBool(env_smtproxy_SendXCLIENT,              defaultSendXCLIENT)
-    clientTimeoutSec    := getEnvInt(env_smtproxy_ClientTimeoutSec,          defaultClientTimeoutSec)
-    maxConnections      := getEnvInt64(env_smtproxy_MaxConnections,          defaultMaxConnections)
+    cfgUpstreams           := strings.Split(getEnv(env_smtproxy_Upstream,        defaultUpstream), ",")
+    cfgTrustedProxies      := strings.Split(getEnv(env_smtproxy_TrustedProxies,  defaultTrustedProxies), ",")
+    cfgTrustStoreFile      := getEnv     (env_smtproxy_TrustedRootFile,          "")
+    cfgListenAddr          := getEnv     (env_smtproxy_ListenAddr,               defaultListenAddr)
+    cfgTLSListenAddr       := getEnv     (env_smtproxy_TlsListenAddr,            defaultTlsListenAddr)
+    cfgProxyProtoEnabled   := getEnvBool (env_smtproxy_ProxyProto,               defaultProxyProtoEnabled)
+    cfgRequireTLS          := getEnvBool (env_smtproxy_RequireTLS,               defaultRequireTLS)
+    cfgUpstreamStartTLS    := getEnvBool (env_smtproxy_UpstreamSTARTTLS,         defaultUpstreamSTARTTLS)
+    cfgUpstreamImplicitTLS := getEnvBool (env_smtproxy_UpstreamTLS,              defaultUpstreamTLS)
+    cfgUpstreamRequireTLS  := getEnvBool (env_smtproxy_UpstreamRequireTLS,       defaultUpstreamRequireTLS)
+    cfgClientTLS13Only     := getEnvBool (env_smtproxy_TLS13Only,                defaultClientTLS13Only)
+    cfgUpstreamTLS13Only   := getEnvBool (env_smtproxy_UpstreamTLS13Only,        defaultUpstreamTLS13Only)
+    cfgSkipCertValidation  := getEnvBool (env_smtproxy_SkipCertValidation,       defaultSkipCertValidation)
+    cfgSendXCLIENT         := getEnvBool (env_smtproxy_SendXCLIENT,              defaultSendXCLIENT)
+    cfgAddHeadersConnect   := getEnvBool (env_smtproxy_AddHeadersConnect,        defaultAddHeadersConnect)
+    cfgAddHeadersTLS       := getEnvBool (env_smtproxy_AddHeadersTLS,            defaultAddHeadersTLS)
+    cfgClientTimeoutSec    := getEnvInt  (env_smtproxy_ClientTimeoutSec,         defaultClientTimeoutSec)
+    cfgMaxConnections      := getEnvInt64(env_smtproxy_MaxConnections,           defaultMaxConnections)
 
-    gMaxShutdownSeconds = getEnvInt(env_smtproxy_MaxShutdownSec,             defaultMaxShutdownSeconds)
-    gCertUpdCheckSec    = getEnvInt(env_smtproxy_CertUpdCheckSec,            defaultCertUpdCheckSec)
-    gMetricListnerAddr  = getEnv(env_smtproxy_MetricsListenAddr,             defaultMetricsAddr)
-    gLogLevel           = getEnvLogLevel(env_smtproxy_LogLevel,              defaultLogLevel)
-    gLogHandshakeLevel  = getEnvLogLevel(env_smtproxy_HandshakeLogLevel,     defaultHandshakeLogLevel)
-    gCertDir            = getEnv(env_smtproxy_CertDir,    defaultCertDir)
-    gMicroCACurveName   = getEnv(env_smtproxy_MicroCaCurveName, "")
-    gDNSServers         = cleanList(strings.Split(getEnv(env_smtproxy_DNSServers, defaultDNSServers), ","))
-    gServerName         = getEnv(env_smtproxy_ServerName, "")
+    gMaxShutdownSeconds    = getEnvInt   (env_smtproxy_MaxShutdownSec,           defaultMaxShutdownSeconds)
+    gCertUpdCheckSec       = getEnvInt   (env_smtproxy_CertUpdCheckSec,          defaultCertUpdCheckSec)
+    gMetricListnerAddr     = getEnv      (env_smtproxy_MetricsListenAddr,        defaultMetricsAddr)
+    gLogLevel              = getEnvLogLevel(env_smtproxy_LogLevel,               defaultLogLevel)
+    gLogHandshakeLevel     = getEnvLogLevel(env_smtproxy_HandshakeLogLevel,      defaultHandshakeLogLevel)
+    gCertDir               = getEnv      (env_smtproxy_CertDir,                  defaultCertDir)
+    gMicroCACurveName      = getEnv      (env_smtproxy_MicroCaCurveName, "")
+    gDNSServers            = cleanList   (strings.Split(getEnv(env_smtproxy_DNSServers, defaultDNSServers), ","))
+    gServerName            = getEnv(     env_smtproxy_ServerName, "")
 
     // Use host name if server name is not specified
     if gServerName == "" {
@@ -543,7 +554,7 @@ func main() {
         gServerName = "localhost"
     }
 
-    routingMode, ErrRoutingMode := ParseRoutingMode(getEnv(env_smtproxy_RoutingMode, defaultRoutingMode))
+    cfgRoutingMode, ErrRoutingMode := ParseRoutingMode(getEnv(env_smtproxy_RoutingMode, defaultRoutingMode))
 
     if ErrRoutingMode != nil {
         log.Fatalf("Invalid routing mode in configuration (%s) Valid options [%s|%s] : %v",
@@ -573,11 +584,11 @@ func main() {
 
     // Set minimum TLS version
 
-    if clientTLS13Only {
+    if cfgClientTLS13Only {
         clientMinTLSVersion = tls.VersionTLS13
     }
 
-    if upstreamTLS13Only {
+    if cfgUpstreamTLS13Only {
         upstreamMinTLSVersion = tls.VersionTLS13
     }
 
@@ -652,25 +663,27 @@ func main() {
     }
 
     cfg := &SmtpProxyCfg{
-        ListenAddr:            listenAddr,
-        TLSListenAddr:         tlsListenAddr,
-        RoutingMode:           routingMode,
-        Upstreams:             cleanList(Upstreams),
-        TrustedProxies:        cleanList(trustedProxies),
-        ProxyProtoEnabled:     proxyProtoEnabled,
-        TrustStoreFile:        trustStoreFile,
+        ListenAddr:            cfgListenAddr,
+        TLSListenAddr:         cfgTLSListenAddr,
+        RoutingMode:           cfgRoutingMode,
+        Upstreams:             cleanList(cfgUpstreams),
+        TrustedProxies:        cleanList(cfgTrustedProxies),
+        ProxyProtoEnabled:     cfgProxyProtoEnabled,
+        TrustStoreFile:        cfgTrustStoreFile,
         ServerTLSConfig:       serverTLS,
-        RequireTLS:            requireTLS,
-        ClientTLS13Only:       clientTLS13Only,
-        UpstreamStartTLS:      upstreamStartTLS,
-        UpstreamImplicitTLS:   upstreamImplicitTLS,
-        UpstreamTLS13Only:     upstreamTLS13Only,
-        UpstreamRequireTLS:    upstreamRequireTLS,
-        InsecureSkipVerify:    skipCertValidation,
+        RequireTLS:            cfgRequireTLS,
+        ClientTLS13Only:       cfgClientTLS13Only,
+        UpstreamStartTLS:      cfgUpstreamStartTLS,
+        UpstreamImplicitTLS:   cfgUpstreamImplicitTLS,
+        UpstreamTLS13Only:     cfgUpstreamTLS13Only,
+        UpstreamRequireTLS:    cfgUpstreamRequireTLS,
+        InsecureSkipVerify:    cfgSkipCertValidation,
         UpstreamMinTLSVersion: upstreamMinTLSVersion,
-        MaxConnections:        maxConnections,
-        SendXCLIENT:           sendXCLIENT,
-        ClientTimeout:         time.Duration(clientTimeoutSec) * time.Second,
+        MaxConnections:        cfgMaxConnections,
+        SendXCLIENT:           cfgSendXCLIENT,
+        AddHeadersConnect:     cfgAddHeadersConnect,
+        AddHeadersTLS:         cfgAddHeadersTLS,
+        ClientTimeout:         time.Duration(cfgClientTimeoutSec) * time.Second,
     }
 
     if "" == cfg.TrustStoreFile {
@@ -717,28 +730,30 @@ func main() {
     showCfg(routingModeValues,            env_smtproxy_RoutingMode,         defaultRoutingMode,                cfg.RoutingMode)
     showCfg("DNS Servers",                env_smtproxy_DNSServers,          formatStr(defaultDNSServers),      gDNSServers)
 
-    if gProxyProtocolSupported == true {
+    if gProxyProtocolSupported {
         showCfg("List of trusted proxies",    env_smtproxy_TrustedProxies,      formatStr(defaultTrustedProxies),  cfg.TrustedProxies)
         showCfg("Use Proxy Protocol",         env_smtproxy_ProxyProto,          defaultProxyProtoEnabled,          cfg.ProxyProtoEnabled)
     }
 
-    showCfg("Require TLS",                env_smtproxy_RequireTLS,          defaultRequireTLS,                 cfg.RequireTLS)
-    showCfg("Upstream use STARTTLS",      env_smtproxy_UpstreamSTARTTLS,    defaultUpstreamSTARTTLS,           cfg.UpstreamStartTLS)
-    showCfg("Upstream requires TLS",      env_smtproxy_UpstreamRequireTLS,  defaultUpstreamRequireTLS,         cfg.UpstreamRequireTLS)
-    showCfg("Upstream implicit TLS",      env_smtproxy_UpstreamTLS,         defaultUpstreamTLS,                cfg.UpstreamImplicitTLS)
-    showCfg("TLS13 only",                 env_smtproxy_TLS13Only,           defaultClientTLS13Only,            cfg.ClientTLS13Only)
-    showCfg("Upstream TLS13 only",        env_smtproxy_UpstreamTLS13Only,   defaultUpstreamTLS13Only,          cfg.UpstreamTLS13Only)
-    showCfg("Skip cert validation",       env_smtproxy_SkipCertValidation,  defaultSkipCertValidation,         cfg.InsecureSkipVerify)
-    showCfg("XCLIENT to signal IP",       env_smtproxy_SendXCLIENT,         defaultSendXCLIENT,                cfg.SendXCLIENT)
-    showCfg("Maximum sessions",           env_smtproxy_MaxConnections,      defaultMaxConnections,             cfg.MaxConnections)
-    showCfg("Trusted root file",          env_smtproxy_TrustedRootFile,     "<System trust store>",            formatStr(cfg.TrustStoreFile))
-    showCfg("Certificate directory",      env_smtproxy_CertDir,             formatStr(defaultCertDir),         formatStr(gCertDir))
-    showCfg("Optional MicroCA CurveName", env_smtproxy_MicroCaCurveName,    formatStr(""),                     gMicroCACurveName)
-    showCfg("Client timeout (sec)",       env_smtproxy_ClientTimeoutSec,    defaultClientTimeoutSec,           cfg.ClientTimeout)
-    showCfg("Max shutdown time (sec)",    env_smtproxy_MaxShutdownSec,      defaultMaxShutdownSeconds,         gMaxShutdownSeconds)
-    showCfg("Cert Update Check (sec)",    env_smtproxy_CertUpdCheckSec,     defaultCertUpdCheckSec,            gCertUpdCheckSec)
-    showCfg(logLevelValues,               env_smtproxy_LogLevel,            defaultLogLevel,                   gLogLevel)
-    showCfg("Handshake Log level",        env_smtproxy_HandshakeLogLevel,   defaultHandshakeLogLevel,          gLogHandshakeLevel)
+    showCfg("Require TLS",                  env_smtproxy_RequireTLS,          defaultRequireTLS,                 cfg.RequireTLS)
+    showCfg("Upstream use STARTTLS",        env_smtproxy_UpstreamSTARTTLS,    defaultUpstreamSTARTTLS,           cfg.UpstreamStartTLS)
+    showCfg("Upstream requires TLS",        env_smtproxy_UpstreamRequireTLS,  defaultUpstreamRequireTLS,         cfg.UpstreamRequireTLS)
+    showCfg("Upstream implicit TLS",        env_smtproxy_UpstreamTLS,         defaultUpstreamTLS,                cfg.UpstreamImplicitTLS)
+    showCfg("TLS13 only",                   env_smtproxy_TLS13Only,           defaultClientTLS13Only,            cfg.ClientTLS13Only)
+    showCfg("Upstream TLS13 only",          env_smtproxy_UpstreamTLS13Only,   defaultUpstreamTLS13Only,          cfg.UpstreamTLS13Only)
+    showCfg("Skip cert validation",         env_smtproxy_SkipCertValidation,  defaultSkipCertValidation,         cfg.InsecureSkipVerify)
+    showCfg("Use XCLIENT to signal client", env_smtproxy_SendXCLIENT,         defaultSendXCLIENT,                cfg.SendXCLIENT)
+    showCfg("Add Client IP/Host heeader",   env_smtproxy_AddHeadersConnect,   defaultAddHeadersConnect,          cfg.AddHeadersConnect)
+    showCfg("Add Client TLS info header",   env_smtproxy_AddHeadersTLS,       defaultAddHeadersTLS,              cfg.AddHeadersTLS)
+    showCfg("Maximum sessions",             env_smtproxy_MaxConnections,      defaultMaxConnections,             cfg.MaxConnections)
+    showCfg("Trusted root file",            env_smtproxy_TrustedRootFile,     "<System trust store>",            formatStr(cfg.TrustStoreFile))
+    showCfg("Certificate directory",        env_smtproxy_CertDir,             formatStr(defaultCertDir),         formatStr(gCertDir))
+    showCfg("Optional MicroCA CurveName",   env_smtproxy_MicroCaCurveName,    formatStr(""),                     gMicroCACurveName)
+    showCfg("Client timeout (sec)",         env_smtproxy_ClientTimeoutSec,    defaultClientTimeoutSec,           cfg.ClientTimeout)
+    showCfg("Max shutdown time (sec)",      env_smtproxy_MaxShutdownSec,      defaultMaxShutdownSeconds,         gMaxShutdownSeconds)
+    showCfg("Cert Update Check (sec)",      env_smtproxy_CertUpdCheckSec,     defaultCertUpdCheckSec,            gCertUpdCheckSec)
+    showCfg(logLevelValues,                 env_smtproxy_LogLevel,            defaultLogLevel,                   gLogLevel)
+    showCfg("Handshake Log level",          env_smtproxy_HandshakeLogLevel,   defaultHandshakeLogLevel,          gLogHandshakeLevel)
 
     if cfg.UpstreamImplicitTLS && cfg.UpstreamRequireTLS {
         fmt.Printf("\nWarning: Upstream STARTTLS and implicit TLS cannot be enabled at the same time!\n\n")
@@ -760,7 +775,7 @@ func main() {
         showInfo("Reverse DNS", "disabled")
     }
 
-    if gProxyProtocolSupported == true {
+    if gProxyProtocolSupported {
         showInfo("Proxy Protocol", "supported")
     }
 
@@ -774,6 +789,12 @@ func main() {
     }
 
     fmt.Printf("\n")
+
+    if cfg.ProxyProtoEnabled {
+        if !gProxyProtocolSupported {
+            log.Fatal("Proxy Protocol configured but smtproxy is not compiled with Proxy Protocol support!")
+        }
+    }
 
     // Wait a second to let all the output flow before starting listeners
     time.Sleep(1 * time.Second)
@@ -791,7 +812,7 @@ func main() {
             }
 
             if cfg.ProxyProtoEnabled {
-                log.Printf("Listening with STARTTLS on [%s] (ProxyProtocol enabled)", cfg.ListenAddr)
+                log.Printf("Listening with STARTTLS on [%s] (proxy protocol: enabled)", cfg.ListenAddr)
             } else {
                 log.Printf("Listening with STARTTLS on [%s]", cfg.ListenAddr)
             }
@@ -837,7 +858,7 @@ func main() {
             }
 
             if cfg.ProxyProtoEnabled {
-                log.Printf("Listening with SMTP TLS on [%s] (ProxyProtocol enabled)", cfg.TLSListenAddr)
+                log.Printf("Listening with SMTP TLS on [%s] (proxy protocol: enabled)", cfg.TLSListenAddr)
             } else {
                 log.Printf("Listening with SMTP TLS on [%s]", cfg.TLSListenAddr)
             }
@@ -982,7 +1003,7 @@ func (s *SmtpSession) readClientLine() (string, error) {
     line, err := s.clientReader.ReadString('\n')
 
     if gLogLevel >= LOG_DEBUG {
-        s.logf(LOG_DEBUG, "C>  %s", strings.TrimSpace(line))
+        s.logf(LOG_DEBUG, "C>  %q", line)
     }
 
     return line, err
@@ -994,33 +1015,47 @@ func (s *SmtpSession) readUpstreamLine() (string, error) {
     line, err := s.upstreamReader.ReadString('\n')
 
     if gLogLevel >= LOG_DEBUG {
-        s.logf(LOG_DEBUG, "U>  %s", strings.TrimSpace(line))
+        s.logf(LOG_DEBUG, "U>  %q", line)
     }
 
     return line, err
 }
 
-func (s *SmtpSession) writeClientBytes(data []byte) error {
+func (s *SmtpSession) writeClientBytes(dataBytes []byte) error {
 
-    written, err := s.client.Write(data)
+    written, err := s.client.Write(dataBytes)
     s.bytesUpstreamToClient += int64(written)
 
     if gLogLevel >= LOG_DEBUG {
-        s.logf(LOG_DEBUG, "C<  %s", strings.TrimSpace(string(data)))
+        s.logf(LOG_DEBUG, "C<  %q", string(dataBytes))
     }
 
     return err
 }
 
-func (s *SmtpSession) writeUpstreamStr(data string) error {
-    written, err := s.upstream.Write([]byte(data))
+func (s *SmtpSession) writeUpstreamStr(dataBytes string) error {
+    written, err := s.upstream.Write([]byte(dataBytes))
     s.bytesClientToUpstream += int64(written)
 
     if gLogLevel >= LOG_DEBUG {
-        s.logf(LOG_DEBUG, "U<  %s", strings.TrimSpace(data))
+        s.logf(LOG_DEBUG, "U<  %q", dataBytes)
     }
 
     return err
+}
+
+func (s *SmtpSession) writeUpstreamHeader(headerName string, headerValue string) error {
+
+    if headerName == "" {
+        return nil
+    }
+
+    if headerValue == "" {
+        return nil
+    }
+
+    line := fmt.Sprintf("%s: %s\r\n", headerName, headerValue)
+    return s.writeUpstreamStr (line)
 }
 
 func (s *SmtpSession) connectUpstream() error {
@@ -1173,6 +1208,7 @@ func (s *SmtpSession) handleStartTLS() error {
     }
 
     if err := s.writeClientBytes(smtpResponse_StartTLSReadyBytes); err != nil {
+        s.logf(LOG_ERROR, "Cannot write STARTTLS response to client: %v", err)
         return err
     }
 
@@ -1235,7 +1271,9 @@ func (s *SmtpSession) handleEHLO(line string) error {
     }
 
     for _, l := range s.responseLines {
-        s.writeClientBytes([]byte(l))
+        if err := s.writeClientBytes([]byte(l));  err != nil {
+            s.logf(LOG_ERROR, "Cannot write response lines to client: %v", err)
+        }
     }
 
     s.countHelo++
@@ -1371,7 +1409,11 @@ func (s *SmtpSession) run() {
     }
 
     if err = s.connectUpstream(); err != nil {
-        s.writeClientBytes(smtpResponse_ServiceUnavailableBytes)
+
+        if err := s.writeClientBytes(smtpResponse_ServiceUnavailableBytes);  err != nil {
+            s.logf(LOG_ERROR, "Cannot write Service Unavailable to client: %v", err)
+        }
+
         return
     }
 
@@ -1404,7 +1446,9 @@ func (s *SmtpSession) run() {
         }
     }
 
-    s.writeClientBytes(smtpResponse_GreetingBytes)
+    if err := s.writeClientBytes(smtpResponse_GreetingBytes); err != nil {
+            s.logf(LOG_ERROR, "Cannot write SMTP Greeting response to client: %v", err)
+    }
 
     if s.inboundTLS {
         s.sendXCLIENT()
@@ -1419,7 +1463,46 @@ func (s *SmtpSession) run() {
 
         line, err := s.readClientLine()
         if err != nil {
+            s.logf(LOG_ERROR, "Cannot read line from client: %v", err)
             return
+        }
+
+        // If data was received session is already in header mode
+        if s.dataCmdReceived {
+
+            header := strings.ToUpper(strings.TrimSpace(line))
+
+            if strings.HasPrefix(header, "SMTPROXY") {
+                s.logf(LOG_ERROR, "WARNING: Skipping spoofed header: %s", header)
+                continue
+            }
+
+            // End of headers reached
+            if header == "" {
+                s.dataHeadersDone = true
+                s.tunnelMode = true
+                s.logf(LOG_DEBUG, "End of RFC822 headers detected -> Switching into tunnel mode")
+
+                if s.cfg.AddHeadersConnect {
+                    clientHeader := fmt.Sprintf("ip=%s host=%s", s.clientIP, s.clientHostName)
+                    s.writeUpstreamHeader("smtproxy-client", clientHeader)
+                }
+
+                if s.cfg.AddHeadersTLS {
+                    if s.clientTLSVersion != "" {
+                        tlsHeader := fmt.Sprintf("version=%s cipher=%s curve=%s", s.clientTLSVersion, s.clientCipher, s.clientCurveID)
+                        s.writeUpstreamHeader("smtproxy-tls", tlsHeader)
+                    }
+                }
+            }
+
+            // Write received line
+            if err := s.writeUpstreamStr(line); err != nil {
+                s.logf(LOG_ERROR, "Cannot write Upstream line: %v", err)
+                return
+            }
+
+            continue
         }
 
         cmd := strings.ToUpper(strings.TrimSpace(line))
@@ -1428,6 +1511,7 @@ func (s *SmtpSession) run() {
             strings.HasPrefix(cmd, "HELO ") {
 
             if err := s.handleEHLO(line); err != nil {
+                s.logf(LOG_ERROR, "Cannot handle EHLO/HELO command: %v", err)
                 return
             }
 
@@ -1437,46 +1521,65 @@ func (s *SmtpSession) run() {
         if cmd == "STARTTLS" {
 
             if err := s.handleStartTLS(); err != nil {
+                s.logf(LOG_ERROR, "Cannot handle STARTTLS command: %v", err)
                 return
             }
 
+            // Send XCLIENT if configured after STARTTLS
             s.sendXCLIENT()
-
             continue
         }
 
+        // Check if in TLS only mode and return an error if channel is not secured
         if s.cfg.RequireTLS && !s.inboundTLS &&
             (strings.HasPrefix(cmd, "MAIL FROM") ||
                 strings.HasPrefix(cmd, "RCPT TO") ||
                 cmd == "DATA") {
 
-            s.writeClientBytes(smtpResponse_TLSRequiredBytes)
+            s.logf(LOG_INFO, "Connection requires TLS but is still unencrypted.")
+
+            if err := s.writeClientBytes(smtpResponse_TLSRequiredBytes); err != nil {
+                s.logf(LOG_ERROR, "Cannot write response to client: %v", err)
+            }
+
             return
         }
 
+        // Write received line
         if err := s.writeUpstreamStr(line); err != nil {
+            s.logf(LOG_ERROR, "Cannot write Upstream line: %v", err)
             return
         }
 
-        switchToTunnel := strings.HasPrefix(cmd, "DATA")
+        // Read and forward response(including multi-line responses
 
         for {
             resp, err := s.readUpstreamLine()
             if err != nil {
+                s.logf(LOG_ERROR, "Cannot read Upstream response: %v", err)
                 return
             }
 
-            s.writeClientBytes([]byte(resp))
+            if err := s.writeClientBytes([]byte(resp)); err != nil {
+                s.logf(LOG_ERROR, "Cannot write response to client: %v", err)
+            }
 
-            if len(resp) < 4 || resp[3] != '-' {
+            if s.dataCmdReceived || len(resp) < 4 || resp[3] != '-'{
                 break
             }
         }
 
-        if switchToTunnel {
-            s.tunnelMode = true
+
+        if strings.HasPrefix(cmd, "DATA") {
+
+            s.dataCmdReceived = true
+
+            // Switch to tunnel mode when DATA received
+            // s.tunnelMode = true
+            // s.logf(LOG_DEBUG, "DATA command detected -> Switching into tunnel mode")
         }
-    }
+
+    } // for
 }
 
 func handleConnection(client net.Conn, cfg *SmtpProxyCfg, implicitTLS bool) {
