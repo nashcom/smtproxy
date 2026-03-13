@@ -64,6 +64,7 @@ const (
     defaultSendXCLIENT         = false
     defaultAddHeadersConnect   = false
     defaultAddHeadersTLS       = false
+    defaultLogJSON             = false
 
     defaultCfgCheckIntervalSec = 120
     defaultClientTimeoutSec    = 120
@@ -97,6 +98,7 @@ const (
     env_smtproxy_AddHeadersConnect   = "SMTPROXY_ADD_HEADERS_CONNECT"
     env_smtproxy_AddHeadersTLS       = "SMTPROXY_ADD_HEADERS_TLS"
     env_smtproxy_LogLevel            = "SMTPROXY_LOGLEVEL"
+    env_smtproxy_LogJSON             = "SMTPROXY_LOGJSON"
     env_smtproxy_HandshakeLogLevel   = "SMTPROXY_HANDSHAKE_LOGLEVEL"
     env_smtproxy_ClientTimeoutSec    = "SMTPROXY_CLIENT_TIMEOUT"
     env_smtproxy_MaxConnections      = "SMTPROXY_MAX_CONNECTIONS"
@@ -136,6 +138,7 @@ var (
     gLogHandshakeLevel LogLevel
 
     gShutdownRequested  bool
+    gLogJSON            bool
     gMaxShutdownSeconds int
 
     gMetricListnerAddr string
@@ -362,16 +365,19 @@ var (
 )
 
 func showCfg(description, variableName, defaultValue, currentValue any) {
-    fmt.Printf("%-34s  %-34s %-30v  %v\n", variableName, description, defaultValue, currentValue)
+    logMsg("%-34s  %-34s %-30v  %v", variableName, description, defaultValue, currentValue)
 }
 
 func showInfo(description, currentValue any) {
-    fmt.Printf("%-15s:  %v\n", description, currentValue)
+    logMsg("%-15s:  %v", description, currentValue)
 }
 
 func showRuntimeInfo() {
 
-    fmt.Printf("\nRuntime\n-------------------------\n\n")
+    logSpace()
+    logMsg("Runtime")
+    logMsg("-------------------------")
+    logSpace()
 
     info, err := readOSRelease()
     if err == nil {
@@ -391,13 +397,13 @@ func showRuntimeInfo() {
 
 func shutdown() {
 
-    log.Println("Shutting down ...")
+    logLine("Shutting down ...")
     gShutdownRequested = true
 
     // Wait one second to make sure the signal arrived at listeners before checking if active sessions must be trained
     time.Sleep(time.Second)
 
-    log.Printf("Waiting maximum %d seconds for shutdown ...\n", gMaxShutdownSeconds)
+    logMsg("Waiting maximum %d seconds for shutdown ...", gMaxShutdownSeconds)
 
     for i := 0; i < gMaxShutdownSeconds; i++ {
         current := atomic.LoadInt64(&gActiveConnections)
@@ -407,7 +413,7 @@ func shutdown() {
         }
 
         if i%10 == 0 {
-            log.Printf("Waiting for %d active connections ...\n", current)
+            logMsg("Waiting for %d active connections ...", current)
         }
         time.Sleep(time.Second)
     }
@@ -415,12 +421,12 @@ func shutdown() {
     remaining := atomic.LoadInt64(&gActiveConnections)
 
     if remaining > 0 {
-        log.Printf("Shutdown timeout after %s seconds, %d connections still active\n", gMaxShutdownSeconds, remaining)
+        logMsg("Shutdown timeout after %s seconds, %d connections still active", gMaxShutdownSeconds, remaining)
     } else {
-        log.Println("All connections closed")
+        logLine("All connections closed")
     }
 
-    log.Println("Shutdown completed")
+    logLine("Shutdown completed")
 }
 
 func reloadCertificates() error {
@@ -434,7 +440,7 @@ func reloadCertificates() error {
 
     time.Sleep(time.Second)
 
-    log.Printf("TLS certificates reloaded (%d certs)", len(certs))
+    logMsg("TLS certificates reloaded (%d certs)", len(certs))
 
     return nil
 }
@@ -455,11 +461,11 @@ func handleSignals() {
         switch sig {
 
         case syscall.SIGHUP:
-            log.Printf("SIGHUP received - Reloading certificates")
+            logMsg("SIGHUP received - Reloading certificates")
             reloadCertificates()
 
         case syscall.SIGINT, syscall.SIGTERM:
-            log.Printf("Shutdown signal received: %v", sig)
+            logMsg("Shutdown signal received: %v", sig)
             shutdown()
             os.Exit(0)
         }
@@ -470,17 +476,17 @@ func CreateMicroCAandCert() {
 
     count, _ := countFilesWithExtension(gCertDir, ".crt")
     if count > 0 {
-        log.Printf("%d certificate(s) in %s", count, gCertDir)
+        logMsg("%d certificate(s) in %s", count, gCertDir)
         return
     }
 
     microCADir := filepath.Join(gCertDir, MICRO_CA_DIRECTORY)
 
-    log.Printf("Creating MicroCA in %s", gCertDir)
+    logMsg("Creating MicroCA in %s", gCertDir)
 
     err := os.MkdirAll(microCADir, 0700)
     if err != nil {
-        log.Printf("ERROR: Failed to create MicroCA directory %s: %v", microCADir, err)
+        logMsg("ERROR: Failed to create MicroCA directory %s: %v", microCADir, err)
         return
     }
 
@@ -505,18 +511,23 @@ func CreateMicroCAandCert() {
 
 func main() {
 
+    log.SetFlags(0)
+
     var err error
-    var printVersion = flag.Bool("version", false, "print version")
+    var printVersion  = flag.Bool("version", false, "print version")
     var showGoVersion = flag.Bool("goversion", false, "show the go runtime version")
 
     flag.Parse()
 
     if *printVersion {
-        fmt.Printf("%s", gVersionStr)
+        logMsg("%s", gVersionStr)
         return
     }
 
-    fmt.Printf("\n")
+    // Get Log format first to ensure all logs are printed in the right format
+    gLogJSON = getEnvBool (env_smtproxy_LogJSON, defaultLogJSON)
+
+    logSpace()
 
     if *showGoVersion {
         showRuntimeInfo()
@@ -569,7 +580,7 @@ func main() {
     cfgRoutingMode, ErrRoutingMode := ParseRoutingMode(getEnv(env_smtproxy_RoutingMode, defaultRoutingMode))
 
     if ErrRoutingMode != nil {
-        log.Fatalf("Invalid routing mode in configuration (%s) Valid options [%s|%s] : %v",
+        logFatal("Invalid routing mode in configuration (%s) Valid options [%s|%s] : %v",
             env_smtproxy_RoutingMode, ROUTING_MODE_FAILOVER, ROUTING_MODE_LOADBALANCE, ErrRoutingMode)
     }
 
@@ -581,12 +592,12 @@ func main() {
 
     if err != nil {
         gConfigErrors++
-        log.Printf("ERROR: Failed to load certificates: %v", err)
+        logMsg("ERROR: Failed to load certificates: %v", err)
     }
 
     if len(certs) == 0 {
         gConfigErrors++
-        log.Printf("ERROR: No certificates found")
+        logMsg("ERROR: No certificates found")
     }
 
     gCertificates.Store(certs)
@@ -634,9 +645,9 @@ func main() {
             if gLogHandshakeLevel >= LOG_INFO {
 
                 if supportsECDSA {
-                    log.Printf("%sClient supports ECDSA", prefix)
+                    logMsg("%sClient supports ECDSA", prefix)
                 } else {
-                    log.Printf("%sClient supports only RSA", prefix)
+                    logMsg("%sClient supports only RSA", prefix)
                 }
             }
 
@@ -648,26 +659,26 @@ func main() {
                 if err != nil {
 
                     if gLogHandshakeLevel >= LOG_INFO {
-                        log.Printf("%sCertificate %d rejected:", prefix, i)
-                        log.Printf("%s  Subject: %s", prefix, cert.Leaf.Subject)
-                        log.Printf("%s  Algorithm: %s", prefix, cert.Leaf.PublicKeyAlgorithm)
-                        log.Printf("%s  Reason: %v", prefix, err)
+                        logMsg("%sCertificate %d rejected:", prefix, i)
+                        logMsg("%s  Subject: %s", prefix, cert.Leaf.Subject)
+                        logMsg("%s  Algorithm: %s", prefix, cert.Leaf.PublicKeyAlgorithm)
+                        logMsg("%s  Reason: %v", prefix, err)
                     }
 
                     continue
                 }
 
                 if gLogHandshakeLevel >= LOG_INFO {
-                    log.Printf("%sCertificate %d selected:", prefix, i)
-                    log.Printf("%s  Subject: %s", prefix, cert.Leaf.Subject)
-                    log.Printf("%s  Algorithm: %s", prefix, cert.Leaf.PublicKeyAlgorithm)
+                    logMsg("%sCertificate %d selected:", prefix, i)
+                    logMsg("%s  Subject: %s", prefix, cert.Leaf.Subject)
+                    logMsg("%s  Algorithm: %s", prefix, cert.Leaf.PublicKeyAlgorithm)
                 }
 
                 return cert, nil
             }
 
             if gLogHandshakeLevel >= LOG_ERROR {
-                log.Printf("%sNo certificate matched, falling back to first", prefix)
+                logMsg("%sNo certificate matched, falling back to first", prefix)
             }
 
             return &certs[0], nil
@@ -709,14 +720,14 @@ func main() {
         cfg.TrustedRoots, err = x509.SystemCertPool()
 
         if nil != err {
-            log.Fatal("Failed to system trusted roots:", err)
+            logFatal("Failed to system trusted roots: %v", err)
         }
 
     } else {
 
         if !fileExists(cfg.TrustStoreFile) {
-            log.Fatalf("Trusted root file does not exist: %s (%s)", cfg.TrustStoreFile, env_smtproxy_TrustedRootFile)
             gConfigErrors++
+            logFatal("Trusted root file does not exist: %s (%s)", cfg.TrustStoreFile, env_smtproxy_TrustedRootFile)
         }
 
         cfg.TrustedRoots = x509.NewCertPool()
@@ -725,18 +736,21 @@ func main() {
         if nil == err {
             cfg.TrustedRoots.AppendCertsFromPEM(ca)
         } else {
-            log.Fatal("Failed to system trusted roots:", err)
+            logFatal("Failed to system trusted roots: %v", err)
         }
     }
 
-    fmt.Printf("\n")
-    fmt.Printf("SMTP Proxy V%s\n", gVersionStr)
-    fmt.Printf("%s\n\n", dashLine(25))
+    logSpace()
+    logMsg("SMTP Proxy V%s", gVersionStr)
+    logMsg("%s", dashLine(25))
+    logSpace()
 
-    fmt.Printf("%s\n\n\n", copyright)
+    logMsg("%s", copyright)
+    logSpace()
+    logSpace()
 
     showCfg("Description", "Variable", "Default", "Current")
-    fmt.Printf("%s\n", dashLine(140))
+    logMsg("%s", dashLine(140))
 
     logLevelValues    := fmt.Sprintf("%s|%s|%s|%s|%s", LOG_NONE, LOG_ERROR, LOG_INFO, LOG_VERBOSE, LOG_DEBUG)
     routingModeValues := fmt.Sprintf("%s|%s", RoutingModeFailover, RoutingModeLoadBalance)
@@ -774,14 +788,17 @@ func main() {
     showCfg("Max shutdown time (sec)",      env_smtproxy_MaxShutdownSec,      defaultMaxShutdownSeconds,         gMaxShutdownSeconds)
     showCfg("Cert Update Check (sec)",      env_smtproxy_CertUpdCheckSec,     defaultCertUpdCheckSec,            gCertUpdCheckSec)
     showCfg(logLevelValues,                 env_smtproxy_LogLevel,            defaultLogLevel,                   gLogLevel)
-    showCfg("Handshake Log level",          env_smtproxy_HandshakeLogLevel,   defaultHandshakeLogLevel,          gLogHandshakeLevel)
+    showCfg("Handshake log level",          env_smtproxy_HandshakeLogLevel,   defaultHandshakeLogLevel,          gLogHandshakeLevel)
+    showCfg("Log output is in JSON format", env_smtproxy_LogJSON,             defaultLogJSON,                    gLogJSON)
 
     if cfg.UpstreamImplicitTLS && cfg.UpstreamRequireTLS {
-        fmt.Printf("\nWarning: Upstream STARTTLS and implicit TLS cannot be enabled at the same time!\n\n")
+        logSpace()
+        logMsg("Warning: Upstream STARTTLS and implicit TLS cannot be enabled at the same time!")
+        logSpace()
     }
 
     showRuntimeInfo()
-    fmt.Printf("\n")
+    logSpace()
     showInfo("Trust Store", len(cfg.TrustedRoots.Subjects()))
 
     gDNSServerCount = len(gDNSServers)
@@ -801,27 +818,29 @@ func main() {
     }
 
     if gConfigErrors > 0 {
-        fmt.Printf("\nWARNING - Configuration %d error(s) -- Please validate your configuration!\n", gConfigErrors)
+        logSpace()
+        logMsg("WARNING - Configuration %d error(s) -- Please validate your configuration!", gConfigErrors)
+        logSpace()
     }
 
     _ , err = parseCIDRs(cfg.TrustedProxies)
     if err != nil {
-        log.Fatal("Invalid TrustedProxies CIDRs:", err)
+        logFatal("Invalid TrustedProxies CIDRs: %v", err)
     }
 
     if errLogExcludeNets != nil {
-        log.Fatal("Invalid Log Exclude Networks CIDRs:", errLogExcludeNets)
+        logFatal("Invalid Log Exclude Networks CIDRs: %v", errLogExcludeNets)
     }
 
     if errDebugLogNets != nil {
-        log.Fatal("Invalid Debug Log Networks CIDRs:", errDebugLogNets)
+        logFatal("Invalid Debug Log Networks CIDRs: %v", errDebugLogNets)
     }
 
-    fmt.Printf("\n")
+    logSpace()
 
     if cfg.ProxyProtoEnabled {
         if !gProxyProtocolSupported {
-            log.Fatal("Proxy Protocol configured but smtproxy is not compiled with Proxy Protocol support!")
+            logFatal("Proxy Protocol configured but smtproxy is not compiled with Proxy Protocol support!")
         }
     }
 
@@ -830,44 +849,45 @@ func main() {
 
     go watchCertificateFiles()
 
-    log.Printf("Starting listeners ...\n\n")
+    logMsg("Starting listeners ...")
+    logSpace()
 
     // Plain SMTP listener (STARTTLS capable)
     if cfg.ListenAddr != "" {
         go func() {
             listener, err := createListener(cfg.ListenAddr, cfg.ProxyProtoEnabled, cfg.TrustedProxies)
             if err != nil {
-                log.Fatal(err)
+                logFatal("Cannot create listener: %v", err)
             }
 
             if cfg.ProxyProtoEnabled {
-                log.Printf("Listening with STARTTLS on [%s] (proxy protocol: enabled)", cfg.ListenAddr)
+                logMsg("Listening with STARTTLS on [%s] (proxy protocol: enabled)", cfg.ListenAddr)
             } else {
-                log.Printf("Listening with STARTTLS on [%s]", cfg.ListenAddr)
+                logMsg("Listening with STARTTLS on [%s]", cfg.ListenAddr)
             }
 
             for {
                 conn, err := listener.Accept()
 
                 if err != nil {
-                    log.Println(err)
+                    logMsg("Error accepting connection: %v", err)
                     continue
                 }
 
                 if errors.Is(err, net.ErrClosed) {
-                    log.Printf("STARTTLS listener closed")
+                    logMsg("STARTTLS listener closed")
                     break
                 }
 
                 if gShutdownRequested {
-                    log.Printf("STARTTLS listener shutdown")
+                    logMsg("STARTTLS listener shutdown")
                     conn.Close()
                     break
                 }
 
                 CurrentActiveConnections := atomic.LoadInt64(&gActiveConnections)
                 if CurrentActiveConnections >= int64(cfg.MaxConnections) {
-                    log.Printf("Connection limit reached (%d), rejecting [%s]", cfg.MaxConnections, conn.RemoteAddr())
+                    logMsg("Connection limit reached (%d), rejecting [%s]", cfg.MaxConnections, conn.RemoteAddr())
                     conn.Close()
                     continue
                 }
@@ -883,42 +903,42 @@ func main() {
             listener, err := createTlsListener(cfg.TLSListenAddr, cfg.ServerTLSConfig, cfg.ProxyProtoEnabled, cfg.TrustedProxies)
 
             if err != nil {
-                log.Fatal(err)
+                logFatal("Cannot create TLS listener: %v", err)
             }
 
             if cfg.ProxyProtoEnabled {
-                log.Printf("Listening with SMTP TLS on [%s] (proxy protocol: enabled)", cfg.TLSListenAddr)
+                logMsg("Listening with SMTP TLS on [%s] (proxy protocol: enabled)", cfg.TLSListenAddr)
             } else {
-                log.Printf("Listening with SMTP TLS on [%s]", cfg.TLSListenAddr)
+                logMsg("Listening with SMTP TLS on [%s]", cfg.TLSListenAddr)
             }
 
             for {
                 conn, err := listener.Accept()
                 if err != nil {
-                    log.Println(err)
+                    logMsg("Error accepting connection: %v", err)
                     continue
                 }
 
                 if errors.Is(err, net.ErrClosed) {
-                    log.Printf("TLS listener closed")
+                    logLine("TLS listener closed")
                     break
                 }
 
                 if gShutdownRequested {
-                    log.Printf("TLS listener shutdown")
+                    logLine("TLS listener shutdown")
                     conn.Close()
                     break
                 }
 
                 CurrentActiveConnections := atomic.LoadInt64(&gActiveConnections)
                 if CurrentActiveConnections >= int64(cfg.MaxConnections) {
-                    log.Printf("Connection limit reached (%d), rejecting [%s]", cfg.MaxConnections, conn.RemoteAddr())
+                    logMsg("Connection limit reached (%d), rejecting [%s]", cfg.MaxConnections, conn.RemoteAddr())
                     conn.Close()
                     continue
                 }
 
                 if gLogLevel >= LOG_DEBUG {
-                    log.Printf("Accepted new client from [%s] (Current Connections: %d)", conn.RemoteAddr(), CurrentActiveConnections)
+                    logMsg("Accepted new client from [%s] (Current Connections: %d)", conn.RemoteAddr(), CurrentActiveConnections)
                 }
 
                 go handleConnection(conn, cfg, true)
@@ -955,7 +975,7 @@ func loadCertificates() ([]tls.Certificate, error) {
 
         if !fileExists(keyFile) {
             gConfigErrors++
-            log.Printf("Skipping certificate %s (missing key file %s)", certFile, keyFile)
+            logMsg("Skipping certificate %s (missing key file %s)", certFile, keyFile)
             continue
         }
 
@@ -1011,56 +1031,6 @@ func NewSmtpSession(client net.Conn, cfg *SmtpProxyCfg, implicitTLS bool) *SmtpS
     }
 }
 
-func (s *SmtpSession) logf(level LogLevel, format string, args ...any) {
-
-    if ipInNets (s.clientNetIP, s.cfg.IPNetDebugLog) {
-        // Special Debug Net Logging
-
-    } else if ipInNets (s.clientNetIP, s.cfg.IPNetExcludeFromLog) {
-        // Excluding from log
-        return
-
-    } else if level > gLogLevel {
-        return
-    }
-
-    if level == LOG_ERROR {
-        s.isError = true
-        s.sessionError = fmt.Sprintf(format, args...)
-    }
-
-    log.Printf("[%08d %s] %s: "+format,
-        append([]any{s.sessionID, s.clientIP, level}, args...)...)
-}
-
-func (s *SmtpSession) logNetError(err error, format string, args ...any) {
-
-    level := LOG_ERROR
-
-    if ipInNets (s.clientNetIP, s.cfg.IPNetDebugLog) {
-        // Special Debug Net Logging
-
-    } else if ipInNets (s.clientNetIP, s.cfg.IPNetExcludeFromLog) {
-        // Excluding from log
-        return
-
-    } else  if err == io.EOF {
-
-        // Only log EOF in verbose log and higher
-        if gLogLevel < LOG_VERBOSE {
-            return
-        }
-
-        level = LOG_VERBOSE
-
-    } else {
-        s.isError = true
-        s.sessionError = fmt.Sprintf(format, args...)
-    }
-
-    log.Printf("[%08d %s] %s: "+format,
-        append([]any{s.sessionID, s.clientIP, level}, args...)...)
-}
 
 func (s *SmtpSession) readClientLine() (string, error) {
     s.client.SetReadDeadline(time.Now().Add(60 * time.Second))
@@ -1286,8 +1256,8 @@ func (s *SmtpSession) handleStartTLS() error {
 
     state := tlsConn.ConnectionState()
     s.clientTLSVersion = tlsVersionString(state.Version)
-    s.clientCipher = tls.CipherSuiteName(state.CipherSuite)
-    s.clientCurveID = state.CurveID.String()
+    s.clientCipher     = tls.CipherSuiteName(state.CipherSuite)
+    s.clientCurveID    = state.CurveID.String()
     s.clientTLSResumed = state.DidResume
 
     s.client = tlsConn
@@ -1505,8 +1475,8 @@ func (s *SmtpSession) run() {
 
             state := tlsConn.ConnectionState()
             s.clientTLSVersion = tlsVersionString(state.Version)
-            s.clientCipher = tls.CipherSuiteName(state.CipherSuite)
-            s.clientCurveID = state.CurveID.String()
+            s.clientCipher     = tls.CipherSuiteName(state.CipherSuite)
+            s.clientCurveID    = state.CurveID.String()
             s.clientTLSResumed = state.DidResume
 
             s.inboundTLS = true
@@ -1684,51 +1654,6 @@ func tlsInfoString(mode TLSMode, version, cipher string, curveID string, resumed
     return fmt.Sprintf("%s %s %s %s %s", mode, version, cipher, curveID, resume)
 }
 
-func (s *SmtpSession) logSessionSummary() {
-
-    duration := time.Since(s.sessionStart)
-    seconds := duration.Seconds()
-    var statusText string
-    var mbps float64
-
-    if seconds > 0 {
-        mbps = float64(s.bytesClientToUpstream) / 1024 / 1024 / seconds
-    }
-
-    if s.isError {
-        statusText = "ERROR: " + s.sessionError
-        atomic.AddInt64(&gSessionError, 1)
-
-    } else {
-        statusText = "OK"
-    }
-
-    s.logf(LOG_INFO,
-        "Session Summary | Duration %.2fs | C->U %s | U->C %s | Avg %.2f MB/s | Client [%s/%s] (%s) -> Upstream [%s] (%s) Status: [%s]",
-        seconds,
-        formatBytes(s.bytesClientToUpstream),
-        formatBytes(s.bytesUpstreamToClient),
-        mbps,
-        s.clientIP,
-        s.clientHostName,
-        tlsInfoString(
-            s.clientTLSMode,
-            s.clientTLSVersion,
-            s.clientCipher,
-            s.clientCurveID,
-            s.clientTLSResumed,
-        ),
-        s.upstreamTarget,
-        tlsInfoString(
-            s.upstreamTLSMode,
-            s.upstreamTLSVersion,
-            s.upstreamCipher,
-            s.upstreamCurveID,
-            s.upstreamTLSResumed,
-        ),
-        statusText,
-    )
-}
 
 func (cfg *SmtpProxyCfg) selectUpstreams() []string {
     switch cfg.RoutingMode {
@@ -1767,7 +1692,7 @@ func watchCertificateFiles() {
 
         entries, err := os.ReadDir(gCertDir)
         if err != nil {
-            log.Printf("Failed to read certificate directory %s: %v", gCertDir, err)
+            logMsg("Failed to read certificate directory %s: %v", gCertDir, err)
         } else {
 
             var newest time.Time
@@ -1792,7 +1717,7 @@ func watchCertificateFiles() {
 
             if newest.After(lastMod) {
 
-                log.Printf("Certificate directory changed: %s", gCertDir)
+                logMsg("Certificate directory changed: %s", gCertDir)
 
                 lastMod = newest
 
@@ -1800,7 +1725,7 @@ func watchCertificateFiles() {
                 time.Sleep(1 * time.Second)
 
                 if err := reloadCertificates(); err != nil {
-                    log.Printf("Certificate reload failed: %v", err)
+                    logMsg("Certificate reload failed: %v", err)
                 }
             }
         }

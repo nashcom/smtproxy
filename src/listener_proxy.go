@@ -3,7 +3,6 @@
 package main
 
 import (
-        "log"
         "net"
         "time"
         "crypto/tls"
@@ -16,13 +15,13 @@ func createListener(listenAddress string, proxyEnabled bool, trustedProxies []st
 
     base, err := net.Listen("tcp", listenAddress)
     if err != nil {
-        log.Printf("Cannot listen on port %v\n", listenAddress)
+        logMsg("Cannot listen on port %v", listenAddress)
         return nil, err
     }
 
     trusted, err := parseCIDRs(trustedProxies)
     if err != nil {
-        log.Printf("Invalid Trusted Proxy configuration on TLS port: %v\n", trustedProxies)
+        logMsg("Invalid Trusted Proxy configuration on TLS port: %v", trustedProxies)
         return nil, err
     }
 
@@ -34,7 +33,7 @@ func createListener(listenAddress string, proxyEnabled bool, trustedProxies []st
             ip := extractIP(addr)
 
             if !ipInNets(ip, trusted) {
-                log.Printf("Untrusted proxy %s based on %v\n", ip, trusted)
+                logMsg("Untrusted proxy %s based on %v", ip, trusted)
                 return proxyproto.REJECT, nil
             }
 
@@ -50,13 +49,13 @@ func createTlsListener(listenAddress string, serverTLSConfig *tls.Config, proxyE
 
     base, err := tls.Listen("tcp", listenAddress, serverTLSConfig)
     if err != nil {
-        log.Printf("Cannot listen on TLS port %v\n", listenAddress)
+        logMsg("Cannot listen on TLS port %v", listenAddress)
         return nil, err
     }
 
     trusted, err := parseCIDRs(trustedProxies)
     if err != nil {
-        log.Printf("Invalid Trusted Proxy configuration on TLS port: %v\n", trustedProxies)
+        logMsg("Invalid Trusted Proxy configuration on TLS port: %v", trustedProxies)
         return nil, err
     }
 
@@ -68,7 +67,7 @@ func createTlsListener(listenAddress string, serverTLSConfig *tls.Config, proxyE
             ip := extractIP(addr)
 
             if !ipInNets(ip, trusted) {
-                log.Printf("TLS Untrusted proxy %s based on %v", ip, trusted)
+                logMsg("TLS Untrusted proxy %s based on %v", ip, trusted)
                 return proxyproto.REJECT, nil
             }
 

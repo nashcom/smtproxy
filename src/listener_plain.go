@@ -3,7 +3,6 @@
 package main
 
 import (
-        "log"
         "net"
         "crypto/tls"
 )
@@ -13,7 +12,7 @@ var gProxyProtocolSupported = false
 func createListener(listenAddress string, proxyEnabled bool, trustedProxies []string) (net.Listener, error) {
 
     if proxyEnabled == true {
-        log.Printf("Proxy protocol requested but not compiled in (ignored)\n")
+        logLine("Proxy protocol requested but not compiled in (ignored)")
     }
 
     return net.Listen("tcp", listenAddress)
@@ -23,7 +22,7 @@ func createListener(listenAddress string, proxyEnabled bool, trustedProxies []st
 func createTlsListener(listenAddress string, serverTLSConfig *tls.Config, proxyEnabled bool, trustedProxies []string) (net.Listener, error) {
 
     if proxyEnabled == true {
-        log.Printf("Proxy protocol requested but not compiled in (ignored)\n")
+        logLine("Proxy protocol requested but not compiled in (ignored)")
     }
 
     return tls.Listen("tcp", listenAddress, serverTLSConfig)

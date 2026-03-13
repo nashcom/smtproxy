@@ -8,7 +8,6 @@ import (
     "errors"
     "fmt"
     "io"
-    "log"
     "net"
     "path/filepath"
     "os"
@@ -17,6 +16,7 @@ import (
     "syscall"
     "time"
 )
+
 
 func formatStr(s string) string {
     if s == "" {
@@ -99,7 +99,7 @@ func getEnvLogLevel(key string, fallback LogLevel) LogLevel {
         if err == nil {
             return level
         } else {
-            log.Printf("ERROR: Invalid log level [%s] for environment variable %s : %v", v, key, err)
+            logMsg("ERROR: Invalid log level [%s] for environment variable %s : %v", v, key, err)
             gConfigErrors++
         }
     }
@@ -113,7 +113,7 @@ func getEnvInt64(key string, fallback int64) int64 {
         if n, err := strconv.ParseInt(v, 10, 64); err == nil {
             return n
         } else {
-            log.Printf("ERROR: Invalid numeric value [%s] for environment variable %s : %v", v, key, err)
+            logMsg("ERROR: Invalid numeric value [%s] for environment variable %s : %v", v, key, err)
             gConfigErrors++
         }
     }
@@ -127,7 +127,7 @@ func getEnvInt(key string, fallback int) int {
         if n, err := strconv.Atoi(v); err == nil {
             return n
         } else {
-            log.Printf("ERROR: Invalid numeric value [%s] for environment variable %s : %v", v, key, err)
+            logMsg("ERROR: Invalid numeric value [%s] for environment variable %s : %v", v, key, err)
             gConfigErrors++
         }
     }
@@ -143,7 +143,7 @@ func getEnvBool(key string, fallback bool) bool {
 
     parsed, err := strconv.ParseBool(val)
     if err != nil {
-        log.Printf("Warning: Invalid bool value [%s] for environment variable %s : %v", parsed, key, err)
+        logMsg("Warning: Invalid bool value [%s] for environment variable %s : %v", parsed, key, err)
         return fallback
     }
 
@@ -225,32 +225,32 @@ func dumpClientHelloInfo(chi *tls.ClientHelloInfo) {
 
     prefix := "[" + chi.Conn.RemoteAddr().String() + "] "
 
-    log.Printf("%s----- TLS ClientHelloInfo -----", prefix)
-    log.Printf("%sClient: SNI: %s", prefix, chi.ServerName)
+    logMsg("%s----- TLS ClientHelloInfo -----", prefix)
+    logMsg("%sClient: SNI: %s", prefix, chi.ServerName)
 
-    log.Printf("%s; Supported Versions:", prefix)
+    logMsg("%s; Supported Versions:", prefix)
     for _, v := range chi.SupportedVersions {
-        log.Printf("%s  %s", prefix, tlsVersionString(v))
+        logMsg("%s  %s", prefix, tlsVersionString(v))
     }
 
-    log.Printf("%sCipher Suites:", prefix)
+    logMsg("%sCipher Suites:", prefix)
     for _, c := range chi.CipherSuites {
-        log.Printf("%s  %s (0x%04x)", prefix, tls.CipherSuiteName(c), c)
+        logMsg("%s  %s (0x%04x)", prefix, tls.CipherSuiteName(c), c)
     }
 
-    log.Printf("%sSignature Schemes:", prefix)
+    logMsg("%sSignature Schemes:", prefix)
     for _, s := range chi.SignatureSchemes {
-        log.Printf("%s  %v", prefix, s)
+        logMsg("%s  %v", prefix, s)
     }
 
-    log.Printf("%sSupported Curves:", prefix)
+    logMsg("%sSupported Curves:", prefix)
     for _, c := range chi.SupportedCurves {
-        log.Printf("%s  %v", prefix, c)
+        logMsg("%s  %v", prefix, c)
     }
 
-    log.Printf("%sSupported Points:", prefix)
+    logMsg("%sSupported Points:", prefix)
     for _, p := range chi.SupportedPoints {
-        log.Printf("%s  %v", prefix, p)
+        logMsg("%s  %v", prefix, p)
     }
 }
 

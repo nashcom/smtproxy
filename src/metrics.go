@@ -6,7 +6,6 @@ package main
 import (
     "bufio"
     "fmt"
-    "log"
     "net/http"
     "strconv"
     "sync/atomic"
@@ -227,11 +226,11 @@ func startMetricsListener(addr string) {
     mux.HandleFunc(metricsEndpoint, metricsHandler)
 
     go func() {
-        log.Printf("Listening at %-8s   on [%s]", metricsEndpoint, addr)
+        logMsg("Listening at %-8s   on [%s]", metricsEndpoint, addr)
 
         err := http.ListenAndServe(addr, mux)
         if err != nil {
-            log.Println("Metrics listener stopped:", err)
+            logMsg("Metrics listener stopped: %v", err)
         }
     }()
 }

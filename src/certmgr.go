@@ -19,7 +19,6 @@ import (
     "encoding/pem"
     "errors"
     "fmt"
-    "log"
     "math/big"
     "os"
     "net"
@@ -31,22 +30,23 @@ func dumpCertificateChain(description string, chain []*x509.Certificate, showDet
 
     // Only prints basic information from leaf only if showDetails is false
 
-    fmt.Printf("\n")
-    fmt.Printf("---------------------------------------------------\n")
+    logSpace()
+    logMsg("---------------------------------------------------")
 
     if showDetails {
-        fmt.Printf("Certificates(%d) %s\n", len(chain), description)
+        logMsg("Certificates(%d) %s", len(chain), description)
     } else {
-        fmt.Printf("Leaf Certificate %s\n", description)
+        logMsg("Leaf Certificate %s", description)
     }
 
-    fmt.Printf("---------------------------------------------------\n")
-    fmt.Printf("\n")
+    logMsg("---------------------------------------------------")
+    logSpace()
 
     for i, cert := range chain {
 
         if showDetails {
-            fmt.Printf("----- Certificate %d -----\n\n", i)
+            logMsg("----- Certificate %d -----", i)
+            logSpace()
 
             if i == 0 {
                 showInfo("Type", "Leaf")
@@ -55,9 +55,9 @@ func dumpCertificateChain(description string, chain []*x509.Certificate, showDet
             }
         }
 
-        showInfo("Subject", cert.Subject.String())
-        showInfo("Issuer", cert.Issuer.String())
-        showInfo("Publicy key", formatPublicKey (cert))
+        showInfo("Subject",    cert.Subject.String())
+        showInfo("Issuer",     cert.Issuer.String())
+        showInfo("Public key", formatPublicKey (cert))
 
         if len(cert.DNSNames) > 0 {
             showInfo("DNS SANs", strings.Join(cert.DNSNames, " "))
@@ -110,7 +110,7 @@ func dumpCertificateChain(description string, chain []*x509.Certificate, showDet
 
         showInfo("NotAfter", cert.NotAfter.Format(time.RFC3339))
 
-        fmt.Printf("\n")
+        logSpace()
 
         // Only show leaf cert
         if false == showDetails {
@@ -540,26 +540,26 @@ func CreateCertAndKey(
 
     if fileExists(rootCertFileName) && fileExists(rootKeyFileName) {
 
-        log.Printf("Using existing root CA: %s", rootCertFileName)
+        logMsg("Using existing root CA: %s", rootCertFileName)
 
         RootCertPEM, err = os.ReadFile(rootCertFileName)
         if err != nil {
-            log.Fatalf("Failed to read root certificate: %v", err)
+            logFatal("Failed to read root certificate: %v", err)
         }
 
         RootKeyPEM, err = os.ReadFile(rootKeyFileName)
         if err != nil {
-            log.Fatalf("Failed to read root key: %v", err)
+            logFatal("Failed to read root key: %v", err)
         }
 
         RootPrivateKey, err = ReadPrivateKeyFromBytes(RootKeyPEM)
         if err != nil {
-            log.Fatalf("Failed to parse root private key: %v", err)
+            logFatal("Failed to parse root private key: %v", err)
         }
 
     } else {
 
-        log.Printf("Generating new root CA")
+        logLine("Generating new root CA")
 
         if curveName == "" {
             RootPrivateKey, err = GenerateRSAKey(4096)
@@ -568,12 +568,12 @@ func CreateCertAndKey(
         }
 
         if err != nil {
-            log.Fatalf("Failed to generate root private key: %v", err)
+            logFatal("Failed to generate root private key: %v", err)
         }
 
         RootCertPEM, RootKeyPEM, err = GenerateRootCertificate(nameRootCA, RootPrivateKey)
         if err != nil {
-            log.Fatalf("Failed to generate root certificate: %v", err)
+            logFatal("Failed to generate root certificate: %v", err)
         }
 
         os.WriteFile(rootCertFileName, RootCertPEM, 0600)
@@ -582,12 +582,12 @@ func CreateCertAndKey(
 
     block, _ := pem.Decode(RootCertPEM)
     if block == nil {
-        log.Fatalf("Failed to decode root certificate")
+        logFatal("Failed to decode root certificate")
     }
 
     RootCert, err := x509.ParseCertificate(block.Bytes)
     if err != nil {
-        log.Fatalf("Failed to parse root certificate: %v", err)
+        logFatal("Failed to parse root certificate: %v", err)
     }
 
     var LeafPrivateKey crypto.Signer
@@ -597,12 +597,12 @@ func CreateCertAndKey(
 
         LeafKeyPEM, err = os.ReadFile(leafKeyFileName)
         if err != nil {
-            log.Fatalf("Failed to read leaf key: %v", err)
+            logFatal("Failed to read leaf key: %v", err)
         }
 
         LeafPrivateKey, err = ReadPrivateKeyFromBytes(LeafKeyPEM)
         if err != nil {
-            log.Fatalf("Failed to parse leaf key: %v", err)
+            logFatal("Failed to parse leaf key: %v", err)
         }
 
     } else {
@@ -614,7 +614,7 @@ func CreateCertAndKey(
         }
 
         if err != nil {
-            log.Fatalf("Failed to generate leaf private key: %v", err)
+            logFatal("Failed to generate leaf private key: %v", err)
         }
 
         KeyBytes, _ := x509.MarshalPKCS8PrivateKey(LeafPrivateKey)
@@ -628,11 +628,11 @@ func CreateCertAndKey(
     }
 
     if !updateCert && fileExists(leafCertFileName) {
-        log.Printf("Leaf certificate already exists: %s", leafCertFileName)
+        logMsg("Leaf certificate already exists: %s", leafCertFileName)
         return
     }
 
-    log.Printf("Generating leaf certificate")
+    logLine("Generating leaf certificate")
 
     LeafCertPEM, _, err := GenerateLeafCertificate(
         commonName,
@@ -644,12 +644,12 @@ func CreateCertAndKey(
     )
 
     if err != nil {
-        log.Fatalf("Failed to generate leaf certificate: %v", err)
+        logMsg("Failed to generate leaf certificate: %v", err)
     }
 
     szCertChain := string(LeafCertPEM) + "\n" + string(RootCertPEM)
 
     os.WriteFile(leafCertFileName, []byte(szCertChain), 0600)
 
-    log.Println("Leaf certificate created or updated")
+    logLine("Leaf certificate created or updated")
 }

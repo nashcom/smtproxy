@@ -28,7 +28,7 @@ This enables the backend mail server to see the **real client IP and TLS paramet
 ## Architecture
 
 ```
-                SMTP Client
+                SMTP Client (client IP)
                      │
                      │
                      ▼
@@ -96,7 +96,7 @@ Example:
 
 ```nginx
 
-worker_processes  1;
+worker_processes 1;
 
 events {
     worker_connections 1024;
@@ -188,7 +188,7 @@ during message submission.
 Example headers:
 
 ```
-smtproxy-client: ip=203.0.113.10 host=
+smtproxy-client: ip=203.0.113.10 host=mail.example.com
 smtproxy-tls: version=TLS1.3 cipher=TLS_AES_128_GCM_SHA256 curve=X25519
 
 ```
