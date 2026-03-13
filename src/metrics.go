@@ -238,12 +238,59 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
     bw.Flush()
 }
 
+// Simple check for now always OK
+
+func healthCheck() (error){
+
+    return nil
+}
+
+func readyCheck() (error){
+
+    return nil
+}
+
+func healthHandler(w http.ResponseWriter, r *http.Request) {
+
+    if err := healthCheck(); err != nil {
+        http.Error(w, fmt.Sprintf("not ready: %v", err), http.StatusServiceUnavailable)
+        return
+    }
+
+    w.WriteHeader(http.StatusOK)
+    w.Write([]byte("ready"))
+}
+
+func readyHandler(w http.ResponseWriter, r *http.Request) {
+
+    if err := readyCheck(); err != nil {
+        http.Error(w, fmt.Sprintf("not ready: %v", err), http.StatusServiceUnavailable)
+        return
+    }
+
+    w.WriteHeader(http.StatusOK)
+    w.Write([]byte("ready"))
+}
+
+func liveHandler(w http.ResponseWriter, r *http.Request) {
+
+    w.WriteHeader(http.StatusOK)
+    w.Write([]byte("alive"))
+}
+
 func startMetricsListener(addr string) {
 
     metricsEndpoint := "/metrics"
+    healthEndpoint  := "/healthz"
+    liveEndpoint    := "/livez"
+    readyEndpoint   := "/readyz"
 
     mux := http.NewServeMux()
+
     mux.HandleFunc(metricsEndpoint, metricsHandler)
+    mux.HandleFunc(healthEndpoint,  healthHandler)
+    mux.HandleFunc(liveEndpoint,    liveHandler)
+    mux.HandleFunc(readyEndpoint,   readyHandler)
 
     go func() {
         logMsg("Listening at %-8s   on [%s]", metricsEndpoint, addr)

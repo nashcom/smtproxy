@@ -18,6 +18,7 @@ import (
     "os/signal"
     "path/filepath"
     "runtime"
+    "strconv"
     "strings"
     "sync"
     "sync/atomic"
@@ -43,6 +44,10 @@ const (
     ROUTING_MODE_FAILOVER      = "failover"
     ROUTING_MODE_LOADBALANCE   = "loadbalance"
     ROUTING_MODE_UNKNOWN       = "unknown"
+
+    SMTPROXY_HEADER_PREFIX     = "X-SMTPROXY" // Must stay uppercase for compare
+    SMTPROXY_HEADER_CLIENT     = "X-SMTProxy-Client"
+    SMTPROXY_HEADER_TLS        = "X-SMTProxy-TLS"
 
     defaultListenAddr          = ":25"
     defaultTlsListenAddr       = ":465"
@@ -279,7 +284,6 @@ func (l LogLevel) String() string {
     }
 }
 
-
 func ParseLogLevel(s string) (LogLevel, error) {
 
     switch strings.ToLower(strings.TrimSpace(s)) {
@@ -400,9 +404,13 @@ func showRuntimeInfo() {
 
     showInfo("CPUs", runtime.NumCPU())
     showInfo("PID", os.Getpid())
+
+    showInfo("UID/GID",   strconv.Itoa(os.Getuid())  + ":" + strconv.Itoa(os.Getgid()))
+    showInfo("EUID/EGID", strconv.Itoa(os.Geteuid()) + ":" + strconv.Itoa(os.Getegid()))
 }
 
 func shutdown() {
+
     logLine("Shutting down ...")
     gShutdownRequested = true
 
@@ -785,8 +793,8 @@ func main() {
     showCfg("Upstream TLS13 only",          env_smtproxy_UpstreamTLS13Only,   defaultUpstreamTLS13Only,          cfg.UpstreamTLS13Only)
     showCfg("Skip cert validation",         env_smtproxy_SkipCertValidation,  defaultSkipCertValidation,         cfg.InsecureSkipVerify)
     showCfg("Use XCLIENT to signal client", env_smtproxy_SendXCLIENT,         defaultSendXCLIENT,                cfg.SendXCLIENT)
-    showCfg("Add Client IP/Host heeader",   env_smtproxy_AddHeadersConnect,   defaultAddHeadersConnect,          cfg.AddHeadersConnect)
-    showCfg("Add Client TLS info header",   env_smtproxy_AddHeadersTLS,       defaultAddHeadersTLS,              cfg.AddHeadersTLS)
+    // showCfg("Add Client IP/Host heeader",   env_smtproxy_AddHeadersConnect,   defaultAddHeadersConnect,          cfg.AddHeadersConnect)
+    // showCfg("Add Client TLS info header",   env_smtproxy_AddHeadersTLS,       defaultAddHeadersTLS,              cfg.AddHeadersTLS)
     showCfg("Maximum sessions",             env_smtproxy_MaxConnections,      defaultMaxConnections,             cfg.MaxConnections)
     showCfg("Trusted root file",            env_smtproxy_TrustedRootFile,     "<System trust store>",            formatStr(cfg.TrustStoreFile))
     showCfg("Certificate directory",        env_smtproxy_CertDir,             formatStr(defaultCertDir),         formatStr(gCertDir))
@@ -1523,7 +1531,7 @@ func (s *SmtpSession) run() {
 
             header := strings.ToUpper(strings.TrimSpace(line))
 
-            if strings.HasPrefix(header, "SMTPROXY") {
+            if strings.HasPrefix(header, SMTPROXY_HEADER_PREFIX) {
                 s.logf(LOG_ERROR, "WARNING: Skipping spoofed header: %s", header)
                 continue
             }
@@ -1536,13 +1544,13 @@ func (s *SmtpSession) run() {
 
                 if s.cfg.AddHeadersConnect {
                     clientHeader := fmt.Sprintf("ip=%s host=%s", s.clientIP, s.clientHostName)
-                    s.writeUpstreamHeader("smtproxy-client", clientHeader)
+                    s.writeUpstreamHeader(SMTPROXY_HEADER_CLIENT, clientHeader)
                 }
 
                 if s.cfg.AddHeadersTLS {
                     if s.clientTLSVersion != "" {
                         tlsHeader := fmt.Sprintf("version=%s cipher=%s curve=%s", s.clientTLSVersion, s.clientCipher, s.clientCurveID)
-                        s.writeUpstreamHeader("smtproxy-tls", tlsHeader)
+                        s.writeUpstreamHeader(SMTPROXY_HEADER_TLS, tlsHeader)
                     }
                 }
             }
@@ -1578,14 +1586,16 @@ func (s *SmtpSession) run() {
 
             // Send XCLIENT if configured after STARTTLS
             s.sendXCLIENT()
+            s.tunnelMode = true
+            s.logf(LOG_DEBUG, "STARTTLS Done -> Switching into tunnel mode")
             continue
         }
 
         // Check if in TLS only mode and return an error if channel is not secured
         if s.cfg.RequireTLS && !s.inboundTLS &&
             (strings.HasPrefix(cmd, "MAIL FROM") ||
-                strings.HasPrefix(cmd, "RCPT TO") ||
-                cmd == "DATA") {
+             strings.HasPrefix(cmd, "RCPT TO") ||
+             cmd == "DATA") {
 
             s.logf(LOG_INFO, "Connection requires TLS but is still unencrypted.")
 
@@ -1623,14 +1633,13 @@ func (s *SmtpSession) run() {
             }
         }
 
-
         if strings.HasPrefix(cmd, "DATA") {
 
             s.dataCmdReceived = true
 
             // Switch to tunnel mode when DATA received
-            // s.tunnelMode = true
-            // s.logf(LOG_DEBUG, "DATA command detected -> Switching into tunnel mode")
+            s.tunnelMode = true
+            s.logf(LOG_DEBUG, "DATA command detected -> Switching into tunnel mode")
         }
 
     } // for
