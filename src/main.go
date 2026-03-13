@@ -110,21 +110,30 @@ const (
     env_smtproxy_MetricsListenAddr   = "SMTPROXY_METRICS_LISTEN_ADDR"
 )
 
-type LogLevel int
-type TLSMode int
+type LogLevel    int
+type TLSMode     int
 type RoutingMode int
+
+
+type Stats struct
+{
+    SessionCounter         atomic.Int64
+    SessionErrors          atomic.Int64
+    ConnectionsActive      atomic.Int64
+    ConnectionsTotal       atomic.Int64
+    ConnectionsSuccess     atomic.Int64
+    ConnectionsErrors      atomic.Int64
+    TotalBytesWritten      atomic.Int64
+    TotalBytesRead         atomic.Int64
+    CertExpiration         atomic.Int64
+    ConfigErrors           atomic.Int64
+}
+
+var stats Stats
 
 
 // Global counters
 
-var (
-    gSessionCounter    int64
-    gSessionError      int64
-    gActiveConnections int64
-    gTotalConnections  int64
-    gCertExpiration    int64
-    gConfigErrors      int64
-)
 
 var gBuildPlatform = "unknown"
 
@@ -134,26 +143,24 @@ var (
 
     gMicroCAName = "smtproxy-MicroCA"
 
-    gLogLevel          LogLevel
-    gLogHandshakeLevel LogLevel
+    gLogLevel           LogLevel
+    gLogHandshakeLevel  LogLevel
 
     gShutdownRequested  bool
     gLogJSON            bool
     gMaxShutdownSeconds int
 
-    gMetricListnerAddr string
-    gServerName string
-    gCertDir    string
-
-    gMicroCACurveName string
-
-    gCertUpdCheckSec int
+    gMetricListnerAddr  string
+    gServerName         string
+    gCertDir            string
+    gMicroCACurveName   string
+    gCertUpdCheckSec    int
 
     gCertificates atomic.Value // Global CertStore
 
-    gRdnsResolver   *RdnsResolver
-    gDNSServers     []string
-    gDNSServerCount int
+    gRdnsResolver      *RdnsResolver
+    gDNSServers        []string
+    gDNSServerCount    int
 
     gVersionStr     = fmt.Sprintf("%d.%d.%d", VersionMajor, VersionMinor, VersionPatch)
     gGoVersion      = runtime.Version()
@@ -396,17 +403,16 @@ func showRuntimeInfo() {
 }
 
 func shutdown() {
-
     logLine("Shutting down ...")
     gShutdownRequested = true
 
-    // Wait one second to make sure the signal arrived at listeners before checking if active sessions must be trained
+    // Wait one second to make sure the signal arrived at listeners before checking if active sessions must be drained
     time.Sleep(time.Second)
 
     logMsg("Waiting maximum %d seconds for shutdown ...", gMaxShutdownSeconds)
 
     for i := 0; i < gMaxShutdownSeconds; i++ {
-        current := atomic.LoadInt64(&gActiveConnections)
+        current := stats.ConnectionsActive.Load()
 
         if current == 0 {
             break
@@ -415,13 +421,14 @@ func shutdown() {
         if i%10 == 0 {
             logMsg("Waiting for %d active connections ...", current)
         }
+
         time.Sleep(time.Second)
     }
 
-    remaining := atomic.LoadInt64(&gActiveConnections)
+    remaining := stats.ConnectionsActive.Load()
 
     if remaining > 0 {
-        logMsg("Shutdown timeout after %s seconds, %d connections still active", gMaxShutdownSeconds, remaining)
+        logMsg("Shutdown timeout after %d seconds, %d connections still active", gMaxShutdownSeconds, remaining)
     } else {
         logLine("All connections closed")
     }
@@ -591,12 +598,12 @@ func main() {
     // For now log errors but don't terminate
 
     if err != nil {
-        gConfigErrors++
+        stats.ConfigErrors.Add(1)
         logMsg("ERROR: Failed to load certificates: %v", err)
     }
 
     if len(certs) == 0 {
-        gConfigErrors++
+        stats.ConfigErrors.Add(1)
         logMsg("ERROR: No certificates found")
     }
 
@@ -726,7 +733,7 @@ func main() {
     } else {
 
         if !fileExists(cfg.TrustStoreFile) {
-            gConfigErrors++
+            stats.ConfigErrors.Add(1)
             logFatal("Trusted root file does not exist: %s (%s)", cfg.TrustStoreFile, env_smtproxy_TrustedRootFile)
         }
 
@@ -817,9 +824,11 @@ func main() {
         showInfo("Proxy Protocol", "supported")
     }
 
-    if gConfigErrors > 0 {
+    ConfigErrors :=  stats.ConfigErrors.Load()
+
+    if ConfigErrors > 0 {
         logSpace()
-        logMsg("WARNING - Configuration %d error(s) -- Please validate your configuration!", gConfigErrors)
+        logMsg("WARNING - Configuration %d error(s) -- Please validate your configuration!", ConfigErrors)
         logSpace()
     }
 
@@ -885,7 +894,7 @@ func main() {
                     break
                 }
 
-                CurrentActiveConnections := atomic.LoadInt64(&gActiveConnections)
+                CurrentActiveConnections := stats.ConnectionsActive.Load()
                 if CurrentActiveConnections >= int64(cfg.MaxConnections) {
                     logMsg("Connection limit reached (%d), rejecting [%s]", cfg.MaxConnections, conn.RemoteAddr())
                     conn.Close()
@@ -930,7 +939,7 @@ func main() {
                     break
                 }
 
-                CurrentActiveConnections := atomic.LoadInt64(&gActiveConnections)
+                CurrentActiveConnections := stats.ConnectionsActive.Load()
                 if CurrentActiveConnections >= int64(cfg.MaxConnections) {
                     logMsg("Connection limit reached (%d), rejecting [%s]", cfg.MaxConnections, conn.RemoteAddr())
                     conn.Close()
@@ -962,7 +971,7 @@ func loadCertificates() ([]tls.Certificate, error) {
     }
 
     if len(crtFiles) == 0 {
-        gConfigErrors++
+        stats.ConfigErrors.Add(1)
         return nil, fmt.Errorf("No certificate files found in %s", gCertDir)
     }
 
@@ -974,14 +983,14 @@ func loadCertificates() ([]tls.Certificate, error) {
         keyFile := strings.TrimSuffix(certFile, ".crt") + ".key"
 
         if !fileExists(keyFile) {
-            gConfigErrors++
+            stats.ConfigErrors.Add(1)
             logMsg("Skipping certificate %s (missing key file %s)", certFile, keyFile)
             continue
         }
 
         cert, err := tls.LoadX509KeyPair(certFile, keyFile)
         if err != nil {
-            gConfigErrors++
+            stats.ConfigErrors.Add(1)
             return nil, fmt.Errorf("Failed to load certificate [%s] or key [%s]: %v", certFile, keyFile, err)
         }
 
@@ -1011,14 +1020,15 @@ func loadCertificates() ([]tls.Certificate, error) {
         return nil, fmt.Errorf("No usable certificate/key pairs found in %s", gCertDir)
     }
 
-    gCertExpiration = minExpiration
-
+    stats.CertExpiration.Store (minExpiration)
     return certs, nil
 }
 
 func NewSmtpSession(client net.Conn, cfg *SmtpProxyCfg, implicitTLS bool) *SmtpSession {
 
-    id := atomic.AddInt64(&gSessionCounter, 1)
+    id := stats.SessionCounter.Add(1)
+
+    stats.ConnectionsTotal.Add(1)
 
     return &SmtpSession{
         cfg:          cfg,
@@ -1628,10 +1638,9 @@ func (s *SmtpSession) run() {
 
 func handleConnection(client net.Conn, cfg *SmtpProxyCfg, implicitTLS bool) {
 
-    atomic.AddInt64(&gActiveConnections, 1)
-    defer atomic.AddInt64(&gActiveConnections, -1)
-
-    atomic.AddInt64(&gTotalConnections, 1)
+    stats.ConnectionsTotal.Add(1)
+    stats.ConnectionsActive.Add(1)
+    defer stats.ConnectionsActive.Add(-1)
 
     defer client.Close()
     session := NewSmtpSession(client, cfg, implicitTLS)

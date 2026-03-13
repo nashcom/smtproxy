@@ -8,7 +8,6 @@ import (
     "fmt"
     "io"
     "os"
-    "sync/atomic"
     "time"
 )
 
@@ -57,13 +56,13 @@ func logSpace() {
     logLine("")
 }
 
-func logMsg(format string, a ...any) {
-    logLine(fmt.Sprintf(format, a...))
+func logMsg(format string, args ...any) {
+    logLine(fmt.Sprintf(format, args ...))
 }
 
-func logFatal(format string, a ...any) {
+func logFatal(format string, args ...any) {
 
-    logLine(fmt.Sprintf(format, a...))
+    logLine(fmt.Sprintf(format, args ...))
     os.Exit(1)
 }
 
@@ -146,21 +145,30 @@ func (s *SmtpSession) logSessionSummary() {
     var statusText string
     var mbps float64
 
+
+    stats.ConnectionsTotal.Add(1)
+
+
     if seconds > 0 {
         mbps = float64(s.bytesClientToUpstream) / 1024 / 1024 / seconds
     }
-
 
     if gLogJSON {
 
         ts := time.Now().UTC().Format(time.RFC3339)
 
         if s.isError {
-            atomic.AddInt64(&gSessionError, 1)
+            stats.ConnectionsErrors.Add(1)
             statusText = "error"
+
         } else {
+            stats.ConnectionsSuccess.Add(1)
             statusText = "ok"
         }
+
+        stats.TotalBytesWritten.Add(s.bytesClientToUpstream)
+        stats.TotalBytesRead.Add(s.bytesUpstreamToClient)
+
 
         log.Printf(
             `{"ts":"%s","type":"%s","id":%d,"client_ip":"%s","client_host":"%s","upstream":"%s","duration":%.3f,"bytes_c2u":%d,"bytes_u2c":%d,"mbps":%.3f,"client_tls_mode":"%s","client_tls_version":"%s","client_cipher":"%s","client_curve":"%s","client_resumed":%t,"upstream_tls_mode":"%s","upstream_tls_version":"%s","upstream_cipher":"%s","upstream_curve":"%s","upstream_resumed":%t,"status":"%s","error":%q}`,
@@ -196,13 +204,13 @@ func (s *SmtpSession) logSessionSummary() {
 
     if s.isError {
         statusText = "ERROR: " + s.sessionError
-        atomic.AddInt64(&gSessionError, 1)
+        stats.SessionErrors.Add(1)
 
     } else {
         statusText = "OK"
     }
 
-    msg :=  fmt.Sprintf (
+    msg := fmt.Sprintf(
         "Session Summary | Duration %.2fs | C->U %s | U->C %s | Avg %.2f MB/s | Client [%s/%s] (%s) -> Upstream [%s] (%s) Status: [%s]",
         seconds,
         formatBytes(s.bytesClientToUpstream),

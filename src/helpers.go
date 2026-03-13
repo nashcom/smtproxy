@@ -100,7 +100,7 @@ func getEnvLogLevel(key string, fallback LogLevel) LogLevel {
             return level
         } else {
             logMsg("ERROR: Invalid log level [%s] for environment variable %s : %v", v, key, err)
-            gConfigErrors++
+            stats.ConfigErrors.Add(1)
         }
     }
 
@@ -114,7 +114,7 @@ func getEnvInt64(key string, fallback int64) int64 {
             return n
         } else {
             logMsg("ERROR: Invalid numeric value [%s] for environment variable %s : %v", v, key, err)
-            gConfigErrors++
+            stats.ConfigErrors.Add(1)
         }
     }
 
@@ -128,7 +128,7 @@ func getEnvInt(key string, fallback int) int {
             return n
         } else {
             logMsg("ERROR: Invalid numeric value [%s] for environment variable %s : %v", v, key, err)
-            gConfigErrors++
+            stats.ConfigErrors.Add(1)
         }
     }
 

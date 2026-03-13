@@ -8,7 +8,6 @@ import (
     "fmt"
     "net/http"
     "strconv"
-    "sync/atomic"
     "time"
 )
 
@@ -79,12 +78,7 @@ func writeMetricFloat(w *bufio.Writer, name string, help string, metricType stri
 
 func metricsHandler(w http.ResponseWriter, r *http.Request) {
 
-    // Load values first
-    activeConnections := atomic.LoadInt64(&gActiveConnections)
-    totalConnections  := atomic.LoadInt64(&gTotalConnections)
-
     w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-
     bw := bufio.NewWriter(w)
 
     writeMetric(
@@ -93,8 +87,7 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
         fmt.Sprintf("Build number (version %s, platform %s)", gVersionStr, gBuildPlatform),
         "gauge",
         VersionBuild,
-        nil,
-    )
+        nil)
 
     writeMetric(
         bw,
@@ -102,29 +95,66 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
         fmt.Sprintf("Go runtime build number (%s)", gGoVersion),
         "gauge",
         gGoVersionBuild,
-        nil,
-    )
+        nil)
 
     writeMetric(
         bw,
-        "smtpproxy_active_connections",
+        "smtpproxy_connections_active",
         "Current active SMTP sessions",
         "gauge",
-        activeConnections,
-        nil,
-    )
+        stats.ConnectionsActive.Load(),
+        nil)
 
     writeMetric(
         bw,
         "smtpproxy_connections_total",
         "Total SMTP connections",
         "counter",
-        totalConnections,
-        nil,
-    )
+        stats.ConnectionsTotal.Load(),
+        nil)
 
-    expiry := time.Unix(gCertExpiration, 0)
-    days := int(time.Until(expiry).Hours() / 24)
+    writeMetric(
+        bw,
+        "smtpproxy_connections_success_total",
+        "Total successful SMTP connections",
+        "counter",
+        stats.ConnectionsSuccess.Load(),
+        nil)
+
+    writeMetric(
+        bw,
+        "smtpproxy_connections_errors_total",
+        "Total failed SMTP connections",
+        "counter",
+        stats.ConnectionsErrors.Load(),
+        nil)
+
+    writeMetric(
+        bw,
+        "smtpproxy_session_errors",
+        "Errors occurred during SMTP session",
+        "gauge",
+        stats.SessionErrors.Load(),
+        nil)
+
+    writeMetric(
+        bw,
+        "smtpproxy_bytes_written_total",
+        "Total bytes written to SMTP clients",
+        "counter",
+        stats.TotalBytesWritten.Load(),
+        nil)
+
+    writeMetric(
+        bw,
+        "smtpproxy_bytes_read_total",
+        "Total bytes read from SMTP clients",
+        "counter",
+        stats.TotalBytesRead.Load(),
+        nil)
+
+    expiry := time.Unix(stats.CertExpiration.Load(), 0)
+    days   := int(time.Until(expiry).Hours() / 24)
 
     helpExpiration := fmt.Sprintf(
         "Earliest TLS certificate expiration time (Unix epoch seconds, %s, %d days remaining)",
@@ -136,19 +166,16 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
         "smtpproxy_tls_cert_expiry_timestamp_seconds",
         helpExpiration,
         "gauge",
-        gCertExpiration,
-        nil,
-    )
+        expiry.Unix(),
+        nil)
 
     writeMetric(
         bw,
         "smtpproxy_config_errors_total",
         "Total configuration errors detected during startup or reload",
         "counter",
-        gConfigErrors,
-        nil,
-    )
-
+        stats.ConfigErrors.Load(),
+        nil)
 
     if gRdnsResolver != nil {
 
@@ -159,15 +186,13 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
         rdnsDnsErrorsTotal       := gRdnsResolver.dnsErrors.Load()
         rdnsDnsQuerySecondsTotal := float64(gRdnsResolver.dnsQueryTime.Load()) / 1e9
 
-
         writeMetric(
             bw,
             "smtpproxy_rdns_cache_hits_total",
             "Total reverse DNS cache hits",
             "counter",
             rdnsCacheHitsTotal,
-            nil,
-        )
+            nil)
 
         writeMetric(
             bw,
@@ -175,8 +200,7 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
             "Total reverse DNS cache misses",
             "counter",
             rdnsCacheMissesTotal,
-            nil,
-        )
+            nil)
 
         writeMetric(
             bw,
@@ -184,8 +208,7 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
             "Total reverse DNS DNS queries performed",
             "counter",
             rdnsDnsQueriesTotal,
-            nil,
-        )
+            nil)
 
         writeMetric(
             bw,
@@ -193,8 +216,7 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
             "Total reverse DNS DNS query timeouts",
             "counter",
             rdnsDnsTimeoutsTotal,
-            nil,
-        )
+            nil)
 
         writeMetric(
             bw,
@@ -202,8 +224,7 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
             "Total reverse DNS DNS query errors",
             "counter",
             rdnsDnsErrorsTotal,
-            nil,
-        )
+            nil)
 
         writeMetricFloat(
             bw,
@@ -211,8 +232,7 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
             "Total time spent performing reverse DNS lookups",
             "counter",
             rdnsDnsQuerySecondsTotal,
-            nil,
-        )
+            nil)
     }
 
     bw.Flush()

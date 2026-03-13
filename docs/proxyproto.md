@@ -16,11 +16,9 @@ SMTP client → NGINX (proxy_protocol) → smtproxy → Domino
 ```
 
 
-`smtproxy` extracts the client information and forwards it to the upstream
-SMTP server (e.g. **HCL Domino**) using either:
+`smtproxy` extracts the client information and forwards it to the upstream SMTP server
 
 - **XCLIENT** SMTP extension
-- **SMTP headers**
 
 This enables the backend mail server to see the **real client IP and TLS parameters**, preserving correct logging, rate limiting, and policy enforcement.
 
@@ -134,6 +132,7 @@ When `smtproxy` receives a connection with PROXY protocol enabled it:
 3. Stores connection attributes
 4. Forwards them to the backend SMTP server
 
+
 The following metadata may be captured:
 
 | Field       | Description                   |
@@ -145,19 +144,11 @@ The following metadata may be captured:
 | TLS curve   | negotiated key exchange curve |
 
 
-Example debug output:
-
-```
-2026/03/12 16:29:19 [00000006 127.0.0.1] DEBUG: U<  "smtproxy-client: ip=1.2.3.4 host=mail.example.com\r\n"
-2026/03/12 16:29:19 [00000006 127.0.0.1] DEBUG: U<  "smtproxy-tls: version=TLS1.3 cipher=TLS_AES_128_GCM_SHA256 curve=X25519\r\n"
-
-```
-
 # Metadata Forwarding
 
 `smtproxy` can forward client metadata to the upstream SMTP server using one of two mechanisms.
 
-## 1. XCLIENT
+## XCLIENT
 
 
 If the backend SMTP server supports the \**XCLIENT\** SMTP extension,
@@ -170,7 +161,6 @@ Example:
 XCLIENT ADDR=203.0.113.10 NAME=client.example
 ```
 
-
 Advantages:
 
 - standardized SMTP extension
@@ -178,27 +168,9 @@ Advantages:
 - avoids modifying message headers
 
 
-## 2. SMTP Headers
-
-
-If **XCLIENT is not available**, `smtproxy` can inject metadata as headers
-
-during message submission.
-
-Example headers:
-
-```
-smtproxy-client: ip=203.0.113.10 host=mail.example.com
-smtproxy-tls: version=TLS1.3 cipher=TLS_AES_128_GCM_SHA256 curve=X25519
-
-```
-
-These headers are inserted before the message is handed to the upstream SMTP server.
-
-
 # Domino Integration
 
-HCL Domino can consume the forwarded metadata using either:
+HCL Domino can consume the forwarded metadata
 
 ## XCLIENT
 
@@ -211,28 +183,6 @@ Benefits:
 - correct spam filtering
 - proper logging
 - accurate policy enforcement
-
-
-## Header Processing
-
-If headers are used instead of XCLIENT, Domino agents or mail rules can inspect the following headers:
-
-```
-smtproxy-client
-smtproxy-tls
-```
-
-These headers provide:
-
-- original client IP
-- TLS parameters
-- connection metadata
-
-
-This allows Domino applications or mail processing logic to make decisions
-
-based on the real sender information.
-
 
 The PROXY protocol **must only be accepted from trusted sources**.
 If exposed publicly, attackers could spoof client IP addresses.
@@ -251,19 +201,6 @@ allow 127.0.0.1
 deny all
 ```
 
-
-# Logging
-
-`smtproxy` logs the extracted metadata to aid debugging and auditing.
-
-Example log:
-
-```
-DEBUG: smtproxy-client: ip=127.0.0.1
-DEBUG: smtproxy-tls: version=TLS1.3 cipher=TLS_AES_128_GCM_SHA256
-
-```
-
 # Summary
 
 `smtproxy` enables modern SMTP proxy deployments by preserving original client information even when connections are routed through a reverse proxy.
@@ -272,7 +209,7 @@ DEBUG: smtproxy-tls: version=TLS1.3 cipher=TLS_AES_128_GCM_SHA256
 Key capabilities:
 
 - PROXY protocol v1/v2 support
-- extraction of client and TLS metadata
-- forwarding via XCLIENT or SMTP headers
+- Extraction of client and TLS metadata
+- Forwarding via XCLIENT
 
 This ensures that backend SMTP servers retain full visibility into the original connection details.
