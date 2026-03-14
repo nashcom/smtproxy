@@ -29,7 +29,7 @@ import (
 const (
     VersionMajor = 1
     VersionMinor = 0
-    VersionPatch = 3
+    VersionPatch = 4
 
     VersionBuild int64 = VersionMajor*10000 + VersionMinor*100 + VersionPatch
 
@@ -44,10 +44,6 @@ const (
     ROUTING_MODE_FAILOVER      = "failover"
     ROUTING_MODE_LOADBALANCE   = "loadbalance"
     ROUTING_MODE_UNKNOWN       = "unknown"
-
-    SMTPROXY_HEADER_PREFIX     = "X-SMTPROXY" // Must stay uppercase for compare
-    SMTPROXY_HEADER_CLIENT     = "X-SMTProxy-Client"
-    SMTPROXY_HEADER_TLS        = "X-SMTProxy-TLS"
 
     defaultListenAddr          = ":25"
     defaultTlsListenAddr       = ":465"
@@ -67,8 +63,6 @@ const (
     defaultUpstreamRequireTLS  = true
     defaultSkipCertValidation  = false
     defaultSendXCLIENT         = false
-    defaultAddHeadersConnect   = false
-    defaultAddHeadersTLS       = false
     defaultLogJSON             = false
 
     defaultCfgCheckIntervalSec = 120
@@ -100,8 +94,6 @@ const (
     env_smtproxy_TrustedRootFile     = "SMTPROXY_TRUSTED_ROOT_FILE"
     env_smtproxy_SkipCertValidation  = "SMTPROXY_SKIP_CERT_VALIDATION"
     env_smtproxy_SendXCLIENT         = "SMTPROXY_SEND_XCLIENT"
-    env_smtproxy_AddHeadersConnect   = "SMTPROXY_ADD_HEADERS_CONNECT"
-    env_smtproxy_AddHeadersTLS       = "SMTPROXY_ADD_HEADERS_TLS"
     env_smtproxy_LogLevel            = "SMTPROXY_LOGLEVEL"
     env_smtproxy_LogJSON             = "SMTPROXY_LOGJSON"
     env_smtproxy_HandshakeLogLevel   = "SMTPROXY_HANDSHAKE_LOGLEVEL"
@@ -119,19 +111,27 @@ type LogLevel    int
 type TLSMode     int
 type RoutingMode int
 
-
 type Stats struct
 {
-    SessionCounter         atomic.Int64
-    SessionErrors          atomic.Int64
-    ConnectionsActive      atomic.Int64
-    ConnectionsTotal       atomic.Int64
-    ConnectionsSuccess     atomic.Int64
-    ConnectionsErrors      atomic.Int64
-    TotalBytesWritten      atomic.Int64
-    TotalBytesRead         atomic.Int64
-    CertExpiration         atomic.Int64
-    ConfigErrors           atomic.Int64
+    SessionCounter          atomic.Int64
+    SessionErrors           atomic.Int64
+    ConnectionsActive       atomic.Int64
+    ConnectionsTotal        atomic.Int64
+    ConnectionsSuccess      atomic.Int64
+    ConnectionsErrors       atomic.Int64
+    TotalBytesWritten       atomic.Int64
+    TotalBytesRead          atomic.Int64
+    CertExpiration          atomic.Int64
+    ConfigErrors            atomic.Int64
+
+    MetricsRequests         atomic.Int64
+    InvalidEndpointRequests atomic.Int64
+    LivenessSuccess         atomic.Int64
+    LivenessFailure         atomic.Int64
+    ReadinessSuccess        atomic.Int64
+    ReadinessFailure        atomic.Int64
+    HealthSuccess           atomic.Int64
+    HealthFailure           atomic.Int64
 }
 
 var stats Stats
@@ -154,12 +154,12 @@ var (
     gShutdownRequested  bool
     gLogJSON            bool
     gMaxShutdownSeconds int
+    gCertUpdCheckSec    int
 
     gMetricListnerAddr  string
     gServerName         string
     gCertDir            string
     gMicroCACurveName   string
-    gCertUpdCheckSec    int
 
     gCertificates atomic.Value // Global CertStore
 
@@ -167,9 +167,14 @@ var (
     gDNSServers        []string
     gDNSServerCount    int
 
-    gVersionStr     = fmt.Sprintf("%d.%d.%d", VersionMajor, VersionMinor, VersionPatch)
-    gGoVersion      = runtime.Version()
-    gGoVersionBuild = parseGoVersionBuild(gGoVersion)
+    gVersionStr        = fmt.Sprintf("%d.%d.%d", VersionMajor, VersionMinor, VersionPatch)
+    gGoVersion         = runtime.Version()
+    gGoVersionBuild    = parseGoVersionBuild(gGoVersion)
+
+    gEndpointMetrics   = "/metrics"
+    gEndpointHealth    = "/healthz"
+    gEndpointLive      = "/livez"
+    gEndpointReady     = "/readyz"
 )
 
 const (
@@ -213,8 +218,6 @@ type SmtpProxyCfg struct {
     UpstreamRequireTLS    bool
     SendXCLIENT           bool
     InsecureSkipVerify    bool
-    AddHeadersConnect     bool
-    AddHeadersTLS         bool
     TrustedRoots          *x509.CertPool
     UpstreamMinTLSVersion uint16
     ClientTimeout         time.Duration
@@ -335,7 +338,6 @@ type SmtpSession struct {
     implicitTLS        bool
     inboundTLS         bool
     dataCmdReceived    bool
-    dataHeadersDone    bool
     tunnelMode         bool
     clientTLSResumed   bool
     upstreamTLSResumed bool
@@ -568,8 +570,6 @@ func main() {
     cfgUpstreamTLS13Only   := getEnvBool (env_smtproxy_UpstreamTLS13Only,        defaultUpstreamTLS13Only)
     cfgSkipCertValidation  := getEnvBool (env_smtproxy_SkipCertValidation,       defaultSkipCertValidation)
     cfgSendXCLIENT         := getEnvBool (env_smtproxy_SendXCLIENT,              defaultSendXCLIENT)
-    cfgAddHeadersConnect   := getEnvBool (env_smtproxy_AddHeadersConnect,        defaultAddHeadersConnect)
-    cfgAddHeadersTLS       := getEnvBool (env_smtproxy_AddHeadersTLS,            defaultAddHeadersTLS)
     cfgClientTimeoutSec    := getEnvInt  (env_smtproxy_ClientTimeoutSec,         defaultClientTimeoutSec)
     cfgMaxConnections      := getEnvInt64(env_smtproxy_MaxConnections,           defaultMaxConnections)
 
@@ -726,8 +726,6 @@ func main() {
         UpstreamMinTLSVersion: upstreamMinTLSVersion,
         MaxConnections:        cfgMaxConnections,
         SendXCLIENT:           cfgSendXCLIENT,
-        AddHeadersConnect:     cfgAddHeadersConnect,
-        AddHeadersTLS:         cfgAddHeadersTLS,
         ClientTimeout:         time.Duration(cfgClientTimeoutSec) * time.Second,
     }
 
@@ -793,8 +791,6 @@ func main() {
     showCfg("Upstream TLS13 only",          env_smtproxy_UpstreamTLS13Only,   defaultUpstreamTLS13Only,          cfg.UpstreamTLS13Only)
     showCfg("Skip cert validation",         env_smtproxy_SkipCertValidation,  defaultSkipCertValidation,         cfg.InsecureSkipVerify)
     showCfg("Use XCLIENT to signal client", env_smtproxy_SendXCLIENT,         defaultSendXCLIENT,                cfg.SendXCLIENT)
-    // showCfg("Add Client IP/Host heeader",   env_smtproxy_AddHeadersConnect,   defaultAddHeadersConnect,          cfg.AddHeadersConnect)
-    // showCfg("Add Client TLS info header",   env_smtproxy_AddHeadersTLS,       defaultAddHeadersTLS,              cfg.AddHeadersTLS)
     showCfg("Maximum sessions",             env_smtproxy_MaxConnections,      defaultMaxConnections,             cfg.MaxConnections)
     showCfg("Trusted root file",            env_smtproxy_TrustedRootFile,     "<System trust store>",            formatStr(cfg.TrustStoreFile))
     showCfg("Certificate directory",        env_smtproxy_CertDir,             formatStr(defaultCertDir),         formatStr(gCertDir))
@@ -1499,7 +1495,6 @@ func (s *SmtpSession) run() {
 
             s.inboundTLS = true
             s.clientTLSMode = TLSModeImplicit // Client is already TLS connected
-
             s.logf(LOG_INFO, "Client implicit TLS [%s] (%s)", s.clientIP, tlsInfoString(s.clientTLSMode, s.clientTLSVersion, s.clientCipher, s.clientCurveID, s.clientTLSResumed))
         }
     }
@@ -1524,44 +1519,6 @@ func (s *SmtpSession) run() {
         if err != nil {
             s.logNetError(err, "Cannot read line from client: %v", err)
             return
-        }
-
-        // If data was received session is already in header mode
-        if s.dataCmdReceived {
-
-            header := strings.ToUpper(strings.TrimSpace(line))
-
-            if strings.HasPrefix(header, SMTPROXY_HEADER_PREFIX) {
-                s.logf(LOG_ERROR, "WARNING: Skipping spoofed header: %s", header)
-                continue
-            }
-
-            // End of headers reached
-            if header == "" {
-                s.dataHeadersDone = true
-                s.tunnelMode = true
-                s.logf(LOG_DEBUG, "End of RFC822 headers detected -> Switching into tunnel mode")
-
-                if s.cfg.AddHeadersConnect {
-                    clientHeader := fmt.Sprintf("ip=%s host=%s", s.clientIP, s.clientHostName)
-                    s.writeUpstreamHeader(SMTPROXY_HEADER_CLIENT, clientHeader)
-                }
-
-                if s.cfg.AddHeadersTLS {
-                    if s.clientTLSVersion != "" {
-                        tlsHeader := fmt.Sprintf("version=%s cipher=%s curve=%s", s.clientTLSVersion, s.clientCipher, s.clientCurveID)
-                        s.writeUpstreamHeader(SMTPROXY_HEADER_TLS, tlsHeader)
-                    }
-                }
-            }
-
-            // Write received line
-            if err := s.writeUpstreamStr(line); err != nil {
-                s.logNetError(err, "Cannot write Upstream line: %v", err)
-                return
-            }
-
-            continue
         }
 
         cmd := strings.ToUpper(strings.TrimSpace(line))
@@ -1612,7 +1569,7 @@ func (s *SmtpSession) run() {
             return
         }
 
-        // Read and forward response(including multi-line responses
+        // Read and forward response (including multi-line responses)
 
         for {
 
