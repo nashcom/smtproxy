@@ -124,11 +124,12 @@ for a in "$@"; do
 done
 
 
-export BUILDAH_FORMAT=1
+export BUILDAH_FORMAT
+export BUILDAH_PROGRESS=plain
 
 header "Building smtproxy image - $IMAGE_DESCRIPTION / $CONTAINER_IMAGE"
 
-"$CONTAINER_CMD" build --no-cache --build-arg GO_BUILD_TAGS="$GO_BUILD_TAGS" -f "$DOCKER_FILE" -t "$CONTAINER_IMAGE" .
+"$CONTAINER_CMD" build --no-cache --progress=plain --build-arg GO_BUILD_TAGS="$GO_BUILD_TAGS" -f "$DOCKER_FILE" -t "$CONTAINER_IMAGE" .
 
 echo
 print_runtime

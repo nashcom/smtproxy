@@ -179,6 +179,13 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
         stats.ConfigErrors.Load(),
         nil)
 
+    writeMetric(
+        bw,
+        "smtpproxy_connections_rejected_rbl_total",
+        "Total SMTP connections rejected due to RBL listings",
+        "counter",
+        stats.ConnectionsRejectedByRBL.Load(),
+        nil)
 
     // Endpoint stats
 
@@ -248,21 +255,67 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 
     // resolver stats
 
-    if gRdnsResolver != nil {
+    if gRblResolver != nil {
 
-        rdnsCacheHitsTotal       := gRdnsResolver.cacheHits.Load()
-        rdnsCacheMissesTotal     := gRdnsResolver.cacheMisses.Load()
-        rdnsDnsQueriesTotal      := gRdnsResolver.dnsQueries.Load()
-        rdnsDnsTimeoutsTotal     := gRdnsResolver.dnsTimeouts.Load()
-        rdnsDnsErrorsTotal       := gRdnsResolver.dnsErrors.Load()
-        rdnsDnsQuerySecondsTotal := float64(gRdnsResolver.dnsQueryTime.Load()) / 1e9
+        writeMetric(
+            bw,
+            "smtpproxy_rbl_dns_queries_total",
+            "Total RBL DNS queries performed",
+            "counter",
+            gRblResolver.dnsQueries.Load(),
+            nil)
+
+        writeMetric(
+            bw,
+            "smtpproxy_rbl_dns_timeouts_total",
+            "Total RBL DNS query timeouts",
+            "counter",
+            gRblResolver.dnsTimeouts.Load(),
+            nil)
+
+        writeMetric(
+            bw,
+            "smtpproxy_rbl_dns_errors_total",
+            "Total RBL DNS query errors",
+            "counter",
+            gRblResolver.dnsErrors.Load(),
+            nil)
+
+        writeMetric(
+            bw,
+            "smtpproxy_rbl_dns_found_total",
+            "Total RBL DNS queries where the IP was listed",
+            "counter",
+            gRblResolver.dnsFound.Load(),
+            nil)
+
+        writeMetric(
+            bw,
+            "smtpproxy_rbl_dns_notfound_total",
+            "Total RBL DNS queries where the IP was not listed",
+            "counter",
+            gRblResolver.dnsNotFound.Load(),
+            nil)
+
+        SecondsTotal := float64(gRblResolver.dnsQueryTime.Load()) / 1e9
+
+        writeMetricFloat(
+            bw,
+            "smtpproxy_rbl_dns_query_seconds_total",
+            "Total time spent performing RBL DNS lookups",
+            "counter",
+            SecondsTotal,
+            nil)
+    }
+
+    if gRdnsResolver != nil {
 
         writeMetric(
             bw,
             "smtpproxy_rdns_cache_hits_total",
             "Total reverse DNS cache hits",
             "counter",
-            rdnsCacheHitsTotal,
+            gRdnsResolver.cacheHits.Load(),
             nil)
 
         writeMetric(
@@ -270,7 +323,7 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
             "smtpproxy_rdns_cache_misses_total",
             "Total reverse DNS cache misses",
             "counter",
-            rdnsCacheMissesTotal,
+            gRdnsResolver.cacheMisses.Load(),
             nil)
 
         writeMetric(
@@ -278,7 +331,7 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
             "smtpproxy_rdns_dns_queries_total",
             "Total reverse DNS DNS queries performed",
             "counter",
-            rdnsDnsQueriesTotal,
+            gRdnsResolver.dnsQueries.Load(),
             nil)
 
         writeMetric(
@@ -286,7 +339,7 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
             "smtpproxy_rdns_dns_timeouts_total",
             "Total reverse DNS DNS query timeouts",
             "counter",
-            rdnsDnsTimeoutsTotal,
+            gRdnsResolver.dnsTimeouts.Load(),
             nil)
 
         writeMetric(
@@ -294,15 +347,17 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
             "smtpproxy_rdns_dns_errors_total",
             "Total reverse DNS DNS query errors",
             "counter",
-            rdnsDnsErrorsTotal,
+            gRdnsResolver.dnsErrors.Load(),
             nil)
+
+        SecondsTotal := float64(gRdnsResolver.dnsQueryTime.Load()) / 1e9
 
         writeMetricFloat(
             bw,
             "smtpproxy_rdns_dns_query_seconds_total",
             "Total time spent performing reverse DNS lookups",
             "counter",
-            rdnsDnsQuerySecondsTotal,
+            SecondsTotal,
             nil)
     }
 

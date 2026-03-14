@@ -136,6 +136,22 @@ func (s *SmtpSession) logNetError(err error, format string, args ...any) {
     logMsg("[%08d %s] %s: %s", s.sessionID, s.clientIP, level, fmt.Sprintf(format, args...))
 }
 
+// Log SMTP Authentication
+
+func (s *SmtpSession) logAuthentication() {
+
+    if gLogJSON {
+
+        ts := time.Now().UTC().Format(time.RFC3339)
+
+        log.Printf(`{"ts":"%s","type":"%s","id":"%d", "client-ip":"%s"}`,
+            ts, "blocked-auth", s.sessionID, s.clientIP)
+        return
+    }
+
+    logMsg("[%08d %s] Connection for IP [%s] blocked due to AUTH attempt", s.sessionID, s.clientIP, s.clientIP)
+}
+
 // SMTP session summary
 
 func (s *SmtpSession) logSessionSummary() {
@@ -145,9 +161,11 @@ func (s *SmtpSession) logSessionSummary() {
     var statusText string
     var mbps float64
 
-
     stats.ConnectionsTotal.Add(1)
 
+    if s.isBlockedByRBL {
+        stats.ConnectionsRejectedByRBL.Add(1)
+    }
 
     if seconds > 0 {
         mbps = float64(s.bytesClientToUpstream) / 1024 / 1024 / seconds

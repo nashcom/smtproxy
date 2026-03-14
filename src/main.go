@@ -5,7 +5,6 @@ package main
 
 import (
     "bufio"
-    "context"
     "crypto/tls"
     "crypto/x509"
     "errors"
@@ -29,7 +28,7 @@ import (
 const (
     VersionMajor = 1
     VersionMinor = 0
-    VersionPatch = 4
+    VersionPatch = 5
 
     VersionBuild int64 = VersionMajor*10000 + VersionMinor*100 + VersionPatch
 
@@ -44,6 +43,7 @@ const (
     ROUTING_MODE_FAILOVER      = "failover"
     ROUTING_MODE_LOADBALANCE   = "loadbalance"
     ROUTING_MODE_UNKNOWN       = "unknown"
+    DNS_RESOLVER_SYSTEM        = "system"
 
     defaultListenAddr          = ":25"
     defaultTlsListenAddr       = ":465"
@@ -64,7 +64,9 @@ const (
     defaultSkipCertValidation  = false
     defaultSendXCLIENT         = false
     defaultLogJSON             = false
-
+    defaultDNSCacheEnabled     = true
+    defaultRblResolver         = DNS_RESOLVER_SYSTEM
+    defaultRblName             = ""
     defaultCfgCheckIntervalSec = 120
     defaultClientTimeoutSec    = 120
     defaultCertDir             = "/tls"
@@ -94,6 +96,7 @@ const (
     env_smtproxy_TrustedRootFile     = "SMTPROXY_TRUSTED_ROOT_FILE"
     env_smtproxy_SkipCertValidation  = "SMTPROXY_SKIP_CERT_VALIDATION"
     env_smtproxy_SendXCLIENT         = "SMTPROXY_SEND_XCLIENT"
+    env_smtproxy_DNSCacheEnabled     = "SMTPROXY_DNS_CACHE_ENABLE"
     env_smtproxy_LogLevel            = "SMTPROXY_LOGLEVEL"
     env_smtproxy_LogJSON             = "SMTPROXY_LOGJSON"
     env_smtproxy_HandshakeLogLevel   = "SMTPROXY_HANDSHAKE_LOGLEVEL"
@@ -101,10 +104,11 @@ const (
     env_smtproxy_MaxConnections      = "SMTPROXY_MAX_CONNECTIONS"
     env_smtproxy_CertDir             = "SMTPROXY_CERT_DIR"
     env_smtproxy_MicroCaCurveName    = "SMTPROXY_MICROCA_CURVE_NAME"
-
     env_smtproxy_MaxShutdownSec      = "SMTPROXY_SHUTDOWN_SECONDS"
     env_smtproxy_CertUpdCheckSec     = "SMTPROXY_CERT_UPDATE_CHECK_SECONDS"
     env_smtproxy_MetricsListenAddr   = "SMTPROXY_METRICS_LISTEN_ADDR"
+    env_smtproxy_RblName             = "SMTPROXY_RBL_NAME"
+    env_smtproxy_RblDnsServer        = "SMTPROXY_RBL_DNS_SERVER"
 )
 
 type LogLevel    int
@@ -113,25 +117,25 @@ type RoutingMode int
 
 type Stats struct
 {
-    SessionCounter          atomic.Int64
-    SessionErrors           atomic.Int64
-    ConnectionsActive       atomic.Int64
-    ConnectionsTotal        atomic.Int64
-    ConnectionsSuccess      atomic.Int64
-    ConnectionsErrors       atomic.Int64
-    TotalBytesWritten       atomic.Int64
-    TotalBytesRead          atomic.Int64
-    CertExpiration          atomic.Int64
-    ConfigErrors            atomic.Int64
-
-    MetricsRequests         atomic.Int64
-    InvalidEndpointRequests atomic.Int64
-    LivenessSuccess         atomic.Int64
-    LivenessFailure         atomic.Int64
-    ReadinessSuccess        atomic.Int64
-    ReadinessFailure        atomic.Int64
-    HealthSuccess           atomic.Int64
-    HealthFailure           atomic.Int64
+    SessionCounter            atomic.Int64
+    SessionErrors             atomic.Int64
+    ConnectionsActive         atomic.Int64
+    ConnectionsTotal          atomic.Int64
+    ConnectionsSuccess        atomic.Int64
+    ConnectionsErrors         atomic.Int64
+    ConnectionsRejectedByRBL  atomic.Int64
+    TotalBytesWritten         atomic.Int64
+    TotalBytesRead            atomic.Int64
+    CertExpiration            atomic.Int64
+    ConfigErrors              atomic.Int64
+    MetricsRequests           atomic.Int64
+    InvalidEndpointRequests   atomic.Int64
+    LivenessSuccess           atomic.Int64
+    LivenessFailure           atomic.Int64
+    ReadinessSuccess          atomic.Int64
+    ReadinessFailure          atomic.Int64
+    HealthSuccess             atomic.Int64
+    HealthFailure             atomic.Int64
 }
 
 var stats Stats
@@ -153,6 +157,7 @@ var (
 
     gShutdownRequested  bool
     gLogJSON            bool
+    gDNScacheEnabled    bool
     gMaxShutdownSeconds int
     gCertUpdCheckSec    int
 
@@ -160,12 +165,18 @@ var (
     gServerName         string
     gCertDir            string
     gMicroCACurveName   string
+    gRblName            string
+    gRbLDnsServer       string
 
     gCertificates atomic.Value // Global CertStore
 
     gRdnsResolver      *RdnsResolver
+    gRblResolver       *RblDnsResolver
     gDNSServers        []string
     gDNSServerCount    int
+
+    gDNSpositiveTTL    = 30 * time.Minute
+    gDNSnegativeTTL    = 10 * time.Minute
 
     gVersionStr        = fmt.Sprintf("%d.%d.%d", VersionMajor, VersionMinor, VersionPatch)
     gGoVersion         = runtime.Version()
@@ -195,7 +206,6 @@ const (
     RoutingModeFailover RoutingMode = iota
     RoutingModeLoadBalance
 )
-
 
 type SmtpProxyCfg struct {
     ListenAddr            string
@@ -237,14 +247,25 @@ type RdnsResolver struct {
     cache      map[string]cacheEntry
     cacheMutex sync.RWMutex
 
-    positiveTTL time.Duration
-    negativeTTL time.Duration
+    positiveTTL  time.Duration
+    negativeTTL  time.Duration
 
     cacheHits    atomic.Int64
     cacheMisses  atomic.Int64
     dnsQueries   atomic.Int64
     dnsTimeouts  atomic.Int64
     dnsErrors    atomic.Int64
+    dnsQueryTime atomic.Int64
+}
+
+type RblDnsResolver struct {
+    resolver *net.Resolver
+
+    dnsQueries   atomic.Int64
+    dnsTimeouts  atomic.Int64
+    dnsErrors    atomic.Int64
+    dnsFound     atomic.Int64
+    dnsNotFound  atomic.Int64
     dnsQueryTime atomic.Int64
 }
 
@@ -342,6 +363,7 @@ type SmtpSession struct {
     clientTLSResumed   bool
     upstreamTLSResumed bool
     isError            bool
+    isBlockedByRBL     bool
 
     clientTLSMode      TLSMode
     upstreamTLSMode    TLSMode
@@ -375,6 +397,7 @@ var (
     smtpResponse_StartTLSReadyBytes      = []byte("220 Ready to start TLS\r\n")
     smtpResponse_ServiceUnavailableBytes = []byte("421 Service not available\r\n")
     smtpResponse_TLSRequiredBytes        = []byte("530 Must issue STARTTLS first\r\n")
+    smtpResponse_BlockedIpByRBL          = []byte("530 Connection rejected by policy\r\n")
 )
 
 func showCfg(description, variableName, defaultValue, currentValue any) {
@@ -558,30 +581,33 @@ func main() {
     cfgExcludeFromLogNets  := strings.Split(getEnv(env_smtproxy_ExcludeFromLogNets, defaultExcludeFromLogNets), ",")
     cfgDebugLogNets        := strings.Split(getEnv(env_smtproxy_DebugLogNets,       defaultDebugLogNets), ",")
     cfgTrustStoreFile      := getEnv     (env_smtproxy_TrustedRootFile,             "")
+    cfgListenAddr          := getEnv     (env_smtproxy_ListenAddr,                  defaultListenAddr)
+    cfgTLSListenAddr       := getEnv     (env_smtproxy_TlsListenAddr,               defaultTlsListenAddr)
+    cfgProxyProtoEnabled   := getEnvBool (env_smtproxy_ProxyProto,                  defaultProxyProtoEnabled)
+    cfgRequireTLS          := getEnvBool (env_smtproxy_RequireTLS,                  defaultRequireTLS)
+    cfgUpstreamStartTLS    := getEnvBool (env_smtproxy_UpstreamSTARTTLS,            defaultUpstreamSTARTTLS)
+    cfgUpstreamImplicitTLS := getEnvBool (env_smtproxy_UpstreamTLS,                 defaultUpstreamTLS)
+    cfgUpstreamRequireTLS  := getEnvBool (env_smtproxy_UpstreamRequireTLS,          defaultUpstreamRequireTLS)
+    cfgClientTLS13Only     := getEnvBool (env_smtproxy_TLS13Only,                   defaultClientTLS13Only)
+    cfgUpstreamTLS13Only   := getEnvBool (env_smtproxy_UpstreamTLS13Only,           defaultUpstreamTLS13Only)
+    cfgSkipCertValidation  := getEnvBool (env_smtproxy_SkipCertValidation,          defaultSkipCertValidation)
+    cfgSendXCLIENT         := getEnvBool (env_smtproxy_SendXCLIENT,                 defaultSendXCLIENT)
+    gDNScacheEnabled       := getEnvBool (env_smtproxy_DNSCacheEnabled,             defaultDNSCacheEnabled)
+    cfgClientTimeoutSec    := getEnvInt  (env_smtproxy_ClientTimeoutSec,            defaultClientTimeoutSec)
+    cfgMaxConnections      := getEnvInt64(env_smtproxy_MaxConnections,              defaultMaxConnections)
 
-    cfgListenAddr          := getEnv     (env_smtproxy_ListenAddr,               defaultListenAddr)
-    cfgTLSListenAddr       := getEnv     (env_smtproxy_TlsListenAddr,            defaultTlsListenAddr)
-    cfgProxyProtoEnabled   := getEnvBool (env_smtproxy_ProxyProto,               defaultProxyProtoEnabled)
-    cfgRequireTLS          := getEnvBool (env_smtproxy_RequireTLS,               defaultRequireTLS)
-    cfgUpstreamStartTLS    := getEnvBool (env_smtproxy_UpstreamSTARTTLS,         defaultUpstreamSTARTTLS)
-    cfgUpstreamImplicitTLS := getEnvBool (env_smtproxy_UpstreamTLS,              defaultUpstreamTLS)
-    cfgUpstreamRequireTLS  := getEnvBool (env_smtproxy_UpstreamRequireTLS,       defaultUpstreamRequireTLS)
-    cfgClientTLS13Only     := getEnvBool (env_smtproxy_TLS13Only,                defaultClientTLS13Only)
-    cfgUpstreamTLS13Only   := getEnvBool (env_smtproxy_UpstreamTLS13Only,        defaultUpstreamTLS13Only)
-    cfgSkipCertValidation  := getEnvBool (env_smtproxy_SkipCertValidation,       defaultSkipCertValidation)
-    cfgSendXCLIENT         := getEnvBool (env_smtproxy_SendXCLIENT,              defaultSendXCLIENT)
-    cfgClientTimeoutSec    := getEnvInt  (env_smtproxy_ClientTimeoutSec,         defaultClientTimeoutSec)
-    cfgMaxConnections      := getEnvInt64(env_smtproxy_MaxConnections,           defaultMaxConnections)
+    gMaxShutdownSeconds    = getEnvInt   (env_smtproxy_MaxShutdownSec,              defaultMaxShutdownSeconds)
+    gCertUpdCheckSec       = getEnvInt   (env_smtproxy_CertUpdCheckSec,             defaultCertUpdCheckSec)
+    gMetricListnerAddr     = getEnv      (env_smtproxy_MetricsListenAddr,           defaultMetricsAddr)
+    gCertDir               = getEnv      (env_smtproxy_CertDir,                     defaultCertDir)
+    gRblName               = getEnv      (env_smtproxy_RblName,                     defaultRblName)
+    gRbLDnsServer          = getEnv      (env_smtproxy_RblDnsServer,                defaultRblResolver)
+    gMicroCACurveName      = getEnv      (env_smtproxy_MicroCaCurveName,            "")
+    gServerName            = getEnv      (env_smtproxy_ServerName,                  "")
+    gMicroCACurveName      = getEnv      (env_smtproxy_MicroCaCurveName,            "")
+    gServerName            = getEnv      (env_smtproxy_ServerName,                  "")
 
-    gMaxShutdownSeconds    = getEnvInt   (env_smtproxy_MaxShutdownSec,           defaultMaxShutdownSeconds)
-    gCertUpdCheckSec       = getEnvInt   (env_smtproxy_CertUpdCheckSec,          defaultCertUpdCheckSec)
-    gMetricListnerAddr     = getEnv      (env_smtproxy_MetricsListenAddr,        defaultMetricsAddr)
-    gLogLevel              = getEnvLogLevel(env_smtproxy_LogLevel,               defaultLogLevel)
-    gLogHandshakeLevel     = getEnvLogLevel(env_smtproxy_HandshakeLogLevel,      defaultHandshakeLogLevel)
-    gCertDir               = getEnv      (env_smtproxy_CertDir,                  defaultCertDir)
-    gMicroCACurveName      = getEnv      (env_smtproxy_MicroCaCurveName, "")
     gDNSServers            = cleanList   (strings.Split(getEnv(env_smtproxy_DNSServers, defaultDNSServers), ","))
-    gServerName            = getEnv(     env_smtproxy_ServerName, "")
 
     // Use host name if server name is not specified
     if gServerName == "" {
@@ -790,12 +816,14 @@ func main() {
     showCfg("TLS13 only",                   env_smtproxy_TLS13Only,           defaultClientTLS13Only,            cfg.ClientTLS13Only)
     showCfg("Upstream TLS13 only",          env_smtproxy_UpstreamTLS13Only,   defaultUpstreamTLS13Only,          cfg.UpstreamTLS13Only)
     showCfg("Skip cert validation",         env_smtproxy_SkipCertValidation,  defaultSkipCertValidation,         cfg.InsecureSkipVerify)
-    showCfg("Use XCLIENT to signal client", env_smtproxy_SendXCLIENT,         defaultSendXCLIENT,                cfg.SendXCLIENT)
+    showCfg("RBL Name to check Client IP",  env_smtproxy_RblName,             defaultRblName,                    gRblName)
+    showCfg("RBL DNS server name",          env_smtproxy_RblDnsServer,        defaultRblResolver,                gRbLDnsServer)
     showCfg("Maximum sessions",             env_smtproxy_MaxConnections,      defaultMaxConnections,             cfg.MaxConnections)
     showCfg("Trusted root file",            env_smtproxy_TrustedRootFile,     "<System trust store>",            formatStr(cfg.TrustStoreFile))
     showCfg("Certificate directory",        env_smtproxy_CertDir,             formatStr(defaultCertDir),         formatStr(gCertDir))
     showCfg("Optional MicroCA CurveName",   env_smtproxy_MicroCaCurveName,    formatStr(""),                     gMicroCACurveName)
     showCfg("Client timeout (sec)",         env_smtproxy_ClientTimeoutSec,    defaultClientTimeoutSec,           cfg.ClientTimeout)
+    showCfg("Use DNS Cache",                env_smtproxy_DNSCacheEnabled,     defaultDNSCacheEnabled,            gDNScacheEnabled)
     showCfg("Max shutdown time (sec)",      env_smtproxy_MaxShutdownSec,      defaultMaxShutdownSeconds,         gMaxShutdownSeconds)
     showCfg("Cert Update Check (sec)",      env_smtproxy_CertUpdCheckSec,     defaultCertUpdCheckSec,            gCertUpdCheckSec)
     showCfg(logLevelValues,                 env_smtproxy_LogLevel,            defaultLogLevel,                   gLogLevel)
@@ -816,6 +844,14 @@ func main() {
 
     if gDNSServerCount > 0 {
         gRdnsResolver = NewRdnsResolver(gDNSServers)
+    }
+
+    if gRbLDnsServer != "" && gRblName != "" {
+        gRblResolver = NewRbldnsResolver(gRbLDnsServer)
+        showInfo("RBL DNS Server", gRbLDnsServer)
+
+    } else {
+        showInfo("RBL DNS Server", "disabled")
     }
 
     if gDNSServerCount > 0 {
@@ -1449,6 +1485,29 @@ func (s *SmtpSession) run() {
 
     s.clientNetIP = s.client.RemoteAddr().(*net.TCPAddr).IP
 
+    if gRblName != "" {
+        listed, result, err := gRblResolver.checkRBL(s.clientNetIP, gRblName)
+
+        if err != nil {
+            s.logf(LOG_ERROR, "RBL Lookup[%s] Error: %v", gRblName, err)
+
+        } else {
+
+            s.logf(LOG_VERBOSE, "RBL Lookup Result for %s on %s -> %s. Listed: %v", s.clientIP, gRblName, result, listed)
+
+            if listed {
+
+                if err := s.writeClientBytes(smtpResponse_BlockedIpByRBL); err != nil {
+                    s.logNetError(err, "Cannot write Connection blocked by RBL: %v", err)
+                }
+
+                s.isBlockedByRBL = true
+                s.logf(LOG_INFO, "Blocked session with IP %s because of RBL result", s.clientIP)
+                return
+            }
+        }
+    }
+
     var ok bool
 
     if gDNSServerCount > 0 {
@@ -1737,117 +1796,4 @@ func readOSRelease() (map[string]string, error) {
     }
 
     return data, scanner.Err()
-}
-
-func NewRdnsResolver(dnsServers []string) *RdnsResolver {
-
-    dialer := &net.Dialer{
-        Timeout: 3 * time.Second,
-    }
-
-    resolver := &net.Resolver{
-        PreferGo: true,
-        Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-
-            server := dnsServers[time.Now().UnixNano()%int64(len(dnsServers))]
-            return dialer.DialContext(ctx, "udp", net.JoinHostPort(server, "53"))
-        },
-    }
-
-    return &RdnsResolver{
-        resolver:    resolver,
-        cache:       make(map[string]cacheEntry),
-        positiveTTL: 30 * time.Minute,
-        negativeTTL: 10 * time.Minute,
-    }
-}
-
-func (r *RdnsResolver) cacheLookup(ip string) (string, bool, bool) {
-
-    now := time.Now()
-
-    r.cacheMutex.RLock()
-    entry, ok := r.cache[ip]
-    r.cacheMutex.RUnlock()
-
-    if !ok || now.After(entry.expire) {
-        return "", false, false
-    }
-
-    r.cacheHits.Add(1)
-
-    if entry.negative {
-        return "", true, true
-    }
-
-    return entry.host, true, false
-}
-
-func (r *RdnsResolver) cacheStore(ip string, host string, negative bool) {
-
-    expire := r.positiveTTL
-    if negative {
-        expire = r.negativeTTL
-    }
-
-    entry := cacheEntry{
-        host:     host,
-        expire:   time.Now().Add(expire),
-        negative: negative,
-    }
-
-    r.cacheMutex.Lock()
-    r.cache[ip] = entry
-    r.cacheMutex.Unlock()
-}
-
-func (r *RdnsResolver) Lookup(ip string) (string, bool) {
-
-    if host, ok, negative := r.cacheLookup(ip); ok {
-
-        if negative {
-            return "", false
-        }
-
-        return host, true
-    }
-
-    r.cacheMisses.Add(1)
-    r.dnsQueries.Add(1)
-
-    start := time.Now()
-
-    ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-    defer cancel()
-
-    names, err := r.resolver.LookupAddr(ctx, ip)
-
-    duration := time.Since(start)
-    r.dnsQueryTime.Add(duration.Nanoseconds())
-
-    if err != nil {
-
-        if errors.Is(err, context.DeadlineExceeded) {
-            r.dnsTimeouts.Add(1)
-        } else {
-            r.dnsErrors.Add(1)
-        }
-
-        r.cacheStore(ip, "", true)
-        return "", false
-    }
-
-    if len(names) == 0 {
-
-        r.dnsErrors.Add(1)
-
-        r.cacheStore(ip, "", true)
-        return "", false
-    }
-
-    host := strings.TrimSuffix(names[0], ".")
-
-    r.cacheStore(ip, host, false)
-
-    return host, true
 }
