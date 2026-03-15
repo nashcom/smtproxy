@@ -558,14 +558,14 @@ func main() {
     cfgClientTimeoutSec    := getEnvInt  (env_smtproxy_ClientTimeoutSec,            defaultClientTimeoutSec)
     cfgMaxConnections      := getEnvInt64(env_smtproxy_MaxConnections,              defaultMaxConnections)
 
+    gLogLevel              = getEnvLogLevel(env_smtproxy_LogLevel,                  defaultLogLevel)
+    gLogHandshakeLevel     = getEnvLogLevel(env_smtproxy_HandshakeLogLevel,         defaultHandshakeLogLevel)
     gMaxShutdownSeconds    = getEnvInt   (env_smtproxy_MaxShutdownSec,              defaultMaxShutdownSeconds)
     gCertUpdCheckSec       = getEnvInt   (env_smtproxy_CertUpdCheckSec,             defaultCertUpdCheckSec)
     gMetricListnerAddr     = getEnv      (env_smtproxy_MetricsListenAddr,           defaultMetricsAddr)
     gCertDir               = getEnv      (env_smtproxy_CertDir,                     defaultCertDir)
     gRblName               = getEnv      (env_smtproxy_RblName,                     defaultRblName)
     gRbLDnsServer          = getEnv      (env_smtproxy_RblDnsServer,                defaultRblResolver)
-    gMicroCACurveName      = getEnv      (env_smtproxy_MicroCaCurveName,            "")
-    gServerName            = getEnv      (env_smtproxy_ServerName,                  "")
     gMicroCACurveName      = getEnv      (env_smtproxy_MicroCaCurveName,            "")
     gServerName            = getEnv      (env_smtproxy_ServerName,                  "")
 
