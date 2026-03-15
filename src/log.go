@@ -11,6 +11,14 @@ import (
     "time"
 )
 
+func showCfg(description, variableName, defaultValue, currentValue any) {
+    logMsg("%-34s  %-34s %-30v  %v", variableName, description, defaultValue, currentValue)
+}
+
+func showInfo(description, currentValue any) {
+    logMsg("%-15s:  %v", description, currentValue)
+}
+
 func (l LogLevel) LowerCaseStr() string {
 
     switch l {

@@ -17,7 +17,6 @@ import (
     "os/signal"
     "path/filepath"
     "runtime"
-    "strconv"
     "strings"
     "sync"
     "sync/atomic"
@@ -140,10 +139,7 @@ type Stats struct
 
 var stats Stats
 
-
-// Global counters
-
-
+// Declared to overwrite by build
 var gBuildPlatform = "unknown"
 
 // Global variables
@@ -399,40 +395,6 @@ var (
     smtpResponse_TLSRequiredBytes        = []byte("530 Must issue STARTTLS first\r\n")
     smtpResponse_BlockedIpByRBL          = []byte("530 Connection rejected by policy\r\n")
 )
-
-func showCfg(description, variableName, defaultValue, currentValue any) {
-    logMsg("%-34s  %-34s %-30v  %v", variableName, description, defaultValue, currentValue)
-}
-
-func showInfo(description, currentValue any) {
-    logMsg("%-15s:  %v", description, currentValue)
-}
-
-func showRuntimeInfo() {
-
-    logSpace()
-    logMsg("Runtime")
-    logMsg("-------------------------")
-    logSpace()
-
-    info, err := readOSRelease()
-    if err == nil {
-        showInfo("Name", info["PRETTY_NAME"])
-        showInfo("ID", info["ID"])
-        showInfo("Version", info["VERSION_ID"])
-    }
-
-    showInfo("Go version", runtime.Version())
-    showInfo("OS", runtime.GOOS)
-    showInfo("Arch", runtime.GOARCH)
-    showInfo("Platform", gBuildPlatform)
-
-    showInfo("CPUs", runtime.NumCPU())
-    showInfo("PID", os.Getpid())
-
-    showInfo("UID/GID",   strconv.Itoa(os.Getuid())  + ":" + strconv.Itoa(os.Getgid()))
-    showInfo("EUID/EGID", strconv.Itoa(os.Geteuid()) + ":" + strconv.Itoa(os.Getegid()))
-}
 
 func shutdown() {
 
@@ -1770,30 +1732,3 @@ func watchCertificateFiles() {
     }
 }
 
-func readOSRelease() (map[string]string, error) {
-
-    file, err := os.Open("/etc/os-release")
-    if err != nil {
-        return nil, err
-    }
-    defer file.Close()
-
-    data := make(map[string]string)
-    scanner := bufio.NewScanner(file)
-
-    for scanner.Scan() {
-        line := scanner.Text()
-
-        if strings.HasPrefix(line, "#") || !strings.Contains(line, "=") {
-            continue
-        }
-
-        parts := strings.SplitN(line, "=", 2)
-        key := parts[0]
-        val := strings.Trim(parts[1], `"`)
-
-        data[key] = val
-    }
-
-    return data, scanner.Err()
-}

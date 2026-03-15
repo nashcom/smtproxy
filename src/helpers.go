@@ -4,6 +4,7 @@
 package main
 
 import (
+    "bufio"
     "crypto/tls"
     "errors"
     "fmt"
@@ -11,12 +12,39 @@ import (
     "net"
     "path/filepath"
     "os"
+    "runtime"
     "strconv"
     "strings"
     "syscall"
     "time"
 )
 
+
+func showRuntimeInfo() {
+
+    logSpace()
+    logMsg("Runtime")
+    logMsg("-------------------------")
+    logSpace()
+
+    info, err := readOSRelease()
+    if err == nil {
+        showInfo("Name", info["PRETTY_NAME"])
+        showInfo("ID", info["ID"])
+        showInfo("Version", info["VERSION_ID"])
+    }
+
+    showInfo("Go version", runtime.Version())
+    showInfo("OS", runtime.GOOS)
+    showInfo("Arch", runtime.GOARCH)
+    showInfo("Platform", gBuildPlatform)
+
+    showInfo("CPUs", runtime.NumCPU())
+    showInfo("PID", os.Getpid())
+
+    showInfo("UID/GID",   strconv.Itoa(os.Getuid())  + ":" + strconv.Itoa(os.Getgid()))
+    showInfo("EUID/EGID", strconv.Itoa(os.Geteuid()) + ":" + strconv.Itoa(os.Getegid()))
+}
 
 func formatStr(s string) string {
     if s == "" {
@@ -337,4 +365,32 @@ func parseCIDRs(list []string) ([]*net.IPNet, error) {
     }
 
     return nets, nil
+}
+
+func readOSRelease() (map[string]string, error) {
+
+    file, err := os.Open("/etc/os-release")
+    if err != nil {
+        return nil, err
+    }
+    defer file.Close()
+
+    data := make(map[string]string)
+    scanner := bufio.NewScanner(file)
+
+    for scanner.Scan() {
+        line := scanner.Text()
+
+        if strings.HasPrefix(line, "#") || !strings.Contains(line, "=") {
+            continue
+        }
+
+        parts := strings.SplitN(line, "=", 2)
+        key := parts[0]
+        val := strings.Trim(parts[1], `"`)
+
+        data[key] = val
+    }
+
+    return data, scanner.Err()
 }
