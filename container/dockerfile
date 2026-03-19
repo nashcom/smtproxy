@@ -22,6 +22,6 @@ COPY --from=builder /tmp/smtproxy /usr/local/bin/smtproxy
 RUN setcap 'cap_net_bind_service=+ep' /usr/local/bin/smtproxy && mkdir /tls && chown 1000 /tls
 
 USER 1000
-EXPOSE 25 465 1025 1465
+EXPOSE 25 465 1025 1465 9100
 
 ENTRYPOINT ["/usr/local/bin/smtproxy"]

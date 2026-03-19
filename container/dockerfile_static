@@ -25,5 +25,5 @@ COPY --from=cap /usr/local/bin/smtproxy /usr/local/bin/smtproxy
 COPY --chown=nonroot:nonroot --from=builder /dev/null /tls/.keep
 
 USER nonroot
-EXPOSE 25 465 1025 1465
+EXPOSE 25 465 1025 1465 9100
 ENTRYPOINT ["/usr/local/bin/smtproxy"]

@@ -3,7 +3,7 @@
 FROM cgr.dev/chainguard/go:latest AS builder
 ARG GIT_COMMIT
 ARG GO_BUILD_TAGS
-WORKDIR /srv
+WORKDIR /src
 COPY ./src .
 RUN CGO_ENABLED=0 go build -tags "${GO_BUILD_TAGS}" -trimpath -ldflags="-s -w -X main.gBuildPlatform=wolfi" -o /tmp/smtproxy
 
@@ -15,5 +15,5 @@ COPY --from=builder /tmp/smtproxy /usr/local/bin/smtproxy
 
 RUN setcap cap_net_bind_service=+ep /usr/local/bin/smtproxy && mkdir -p /tls && chown nonroot /tls
 USER nonroot
-EXPOSE 25 465 1025 1465
+EXPOSE 25 465 1025 1465 9100
 ENTRYPOINT ["/usr/local/bin/smtproxy"]
