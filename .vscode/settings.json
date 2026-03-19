@@ -1,0 +1,12 @@
+{
+    "files.eol": "\n",
+    "editor.formatOnSave": false,
+    "editor.formatOnPaste": false,
+    "editor.formatOnType": false,
+    "files.insertFinalNewline": false,
+    "files.trimTrailingWhitespace": false,
+    "[go]": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "golang.go"
+    }
+}
